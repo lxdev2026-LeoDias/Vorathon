@@ -1,0 +1,169 @@
+import { Entity } from './Types';
+import { visualEffectSystem } from '../systems/visualEffectSystem';
+import { getPlayerState } from './Store';
+
+export enum BulletType {
+    NORMAL = 'NORMAL',
+    MISSILE = 'MISSILE',
+    PLASMA = 'PLASMA',
+    ARC = 'ARC'
+}
+
+export class Bullet implements Entity {
+  x: number;
+  y: number;
+  width: number = 20;
+  height: number = 4;
+  speed: number = 900;
+  angle: number;
+  isEnemyBullet: boolean;
+  active: boolean = true;
+  color?: string;
+  type: BulletType = BulletType.NORMAL;
+  damageMult: number = 1;
+  private trailTimer: number = 0;
+  private target: Entity | null = null;
+
+  constructor(x: number, y: number, angle: number, isEnemy: boolean = false, color?: string, type: BulletType = BulletType.NORMAL, damageMult: number = 1) {
+    this.x = x;
+    this.y = y;
+    this.angle = angle;
+    this.isEnemyBullet = isEnemy;
+    this.color = color;
+    this.type = type;
+    this.damageMult = damageMult;
+
+    if (isEnemy) {
+        this.speed = 400;
+        this.width = 15;
+    }
+
+    if (this.type === BulletType.MISSILE) {
+        this.width = 25;
+        this.height = 10;
+        this.speed = 600;
+    } else if (this.type === BulletType.PLASMA) {
+        this.width = 30;
+        this.height = 30;
+        this.speed = 500;
+    } else if (this.type === BulletType.ARC) {
+        this.width = 40;
+        this.height = 15;
+        this.speed = 1200;
+    }
+  }
+
+  setTarget(target: Entity) {
+      this.target = target;
+  }
+
+  update(delta: number) {
+    if (this.type === BulletType.MISSILE && this.target) {
+        const dx = this.target.x - this.x;
+        const dy = this.target.y - this.y;
+        const targetAngle = Math.atan2(dy, dx);
+        
+        // Simple rotation towards target
+        let diff = targetAngle - this.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        this.angle += diff * 5 * delta;
+    }
+
+    this.x += Math.cos(this.angle) * this.speed * delta;
+    this.y += Math.sin(this.angle) * this.speed * delta;
+
+    this.trailTimer += delta;
+    if (this.trailTimer > 0.03) {
+        this.trailTimer = 0;
+        const isOverloaded = !this.isEnemyBullet && getPlayerState().stats.isOverloaded;
+        const defaultColor = isOverloaded ? '#60a5facc' : '#3b82f699';
+        const trailColor = this.isEnemyBullet ? '#ef444499' : (this.color ? this.color + '99' : defaultColor);
+
+        visualEffectSystem.emitTrailParticles(
+            this.x, 
+            this.y, 
+            trailColor, 
+            (isOverloaded || this.type !== BulletType.NORMAL) ? 4 : 1.5
+        );
+    }
+  }
+
+  draw(ctx: CanvasRenderingContext2D) {
+    if (!this.active) return;
+    const isOverloaded = !this.isEnemyBullet && getPlayerState().stats.isOverloaded;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.angle);
+    
+    const defaultMainColor = isOverloaded ? '#93c5fd' : '#60a5fa';
+    const mainColor = this.isEnemyBullet ? '#ef4444' : (this.color || defaultMainColor);
+    
+    if (this.type === BulletType.NORMAL) {
+        // 1. Long Energy Trail
+        if (!this.isEnemyBullet) {
+            ctx.save();
+            ctx.globalAlpha = isOverloaded ? 0.5 : 0.3;
+            ctx.fillStyle = this.color || (isOverloaded ? '#93c5fd' : '#60a5fa');
+            ctx.beginPath();
+            ctx.ellipse(-20, 0, isOverloaded ? 45 : 30, isOverloaded ? 12 : 8, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // 2. Main Beam / Bolt
+        ctx.fillStyle = mainColor;
+        const beamLength = this.isEnemyBullet ? this.width : (isOverloaded ? this.width * 3.5 : this.width * 2.5);
+        const beamHeight = this.isEnemyBullet ? this.height : (isOverloaded ? this.height * 2.2 : this.height * 1.5);
+        
+        ctx.beginPath();
+        ctx.moveTo(8, 0); // Tip
+        ctx.lineTo(-beamLength, -beamHeight);
+        ctx.lineTo(-beamLength * 0.8, 0);
+        ctx.lineTo(-beamLength, beamHeight);
+        ctx.closePath();
+        ctx.fill();
+    } else if (this.type === BulletType.MISSILE) {
+        ctx.fillStyle = mainColor;
+        ctx.beginPath();
+        ctx.roundRect(-this.width/2, -this.height/2, this.width, this.height, 4);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(this.width/4, -this.height/4, this.width/4, this.height/2);
+    } else if (this.type === BulletType.PLASMA) {
+        const pulse = 1 + Math.sin(performance.now() / 100) * 0.1;
+        ctx.fillStyle = mainColor;
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = mainColor;
+        ctx.beginPath();
+        ctx.arc(0, 0, (this.width/2) * pulse, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(0, 0, (this.width/4) * pulse, 0, Math.PI * 2);
+        ctx.fill();
+    } else if (this.type === BulletType.ARC) {
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = mainColor;
+        ctx.beginPath();
+        ctx.moveTo(-this.width/2, 0);
+        for(let i = -this.width/2; i < this.width/2; i += 5) {
+            ctx.lineTo(i, (Math.random() - 0.5) * 15);
+        }
+        ctx.stroke();
+    }
+    
+    // 3. High Intensity Core (for normal bullets)
+    if (this.type === BulletType.NORMAL) {
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 4, 1.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    ctx.restore();
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "stages": [
+    {
+      "id": "fase_01",
+      "name": "O Limiar do Vácuo",
+      "duration": 120,
+      "bossSpawnTime": 60,
+      "enemyPool": ["COMMON", "FAST"],
+      "initialSpawnRate": 1.5,
+      "maxSpawnRate": 0.5,
+      "bossId": "boss_hades"
+    },
+    {
+      "id": "fase_02",
+      "name": "As Marés Estáticas",
+      "duration": 180,
+      "bossSpawnTime": 120,
+      "enemyPool": ["COMMON", "FAST"],
+      "initialSpawnRate": 1.2,
+      "maxSpawnRate": 0.3,
+      "bossId": "boss_poseidon"
+    },
+    {
+      "id": "fase_03",
+      "name": "O Trovão Interrompido",
+      "duration": 180,
+      "bossSpawnTime": 120,
+      "enemyPool": ["COMMON", "FAST", "ELITE"],
+      "initialSpawnRate": 1.0,
+      "maxSpawnRate": 0.25,
+      "bossId": "boss_zeus"
+    },
+    {
+      "id": "fase_04",
+      "name": "Círculo de Ares",
+      "duration": 200,
+      "bossSpawnTime": 150,
+      "enemyPool": ["COMMON", "FAST", "TANK"],
+      "initialSpawnRate": 1.0,
+      "maxSpawnRate": 0.2,
+      "bossId": "boss_ares"
+    },
+    {
+      "id": "fase_05",
+      "name": "O Algoritmo de Athena",
+      "duration": 200,
+      "bossSpawnTime": 150,
+      "enemyPool": ["COMMON", "FAST", "TANK"],
+      "initialSpawnRate": 0.9,
+      "maxSpawnRate": 0.18,
+      "bossId": "boss_athena"
+    },
+    {
+      "id": "fase_06",
+      "name": "Velocidade de Escape",
+      "duration": 150,
+      "bossSpawnTime": 90,
+      "enemyPool": ["FAST", "ELITE"],
+      "initialSpawnRate": 0.8,
+      "maxSpawnRate": 0.15,
+      "bossId": "boss_hermes"
+    },
+    {
+      "id": "fase_07",
+      "name": "Sombra da Caçadora",
+      "duration": 240,
+      "bossSpawnTime": 180,
+      "enemyPool": ["COMMON", "FAST", "TANK", "ELITE"],
+      "initialSpawnRate": 1.1,
+      "maxSpawnRate": 0.2,
+      "bossId": "boss_artemis"
+    },
+    {
+      "id": "fase_08",
+      "name": "A Forja do Vácuo",
+      "duration": 240,
+      "bossSpawnTime": 180,
+      "enemyPool": ["TANK", "ELITE"],
+      "initialSpawnRate": 1.0,
+      "maxSpawnRate": 0.15,
+      "bossId": "boss_hephaestus"
+    },
+    {
+      "id": "fase_09",
+      "name": "Fractal do Tempo",
+      "duration": 300,
+      "bossSpawnTime": 240,
+      "enemyPool": ["COMMON", "FAST", "TANK", "ELITE"],
+      "initialSpawnRate": 0.8,
+      "maxSpawnRate": 0.12,
+      "bossId": "boss_chronos"
+    },
+    {
+      "id": "fase_10",
+      "name": "Noite Eterna",
+      "duration": 360,
+      "bossSpawnTime": 300,
+      "enemyPool": ["ELITE", "TANK"],
+      "initialSpawnRate": 0.7,
+      "maxSpawnRate": 0.1,
+      "bossId": "boss_nyx"
+    }
+  ]
+}
