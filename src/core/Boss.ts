@@ -1,5 +1,6 @@
 import { Entity } from './Types';
 import { effectsSystem } from '../systems/effectsSystem';
+import { BulletType } from './Bullet';
 
 export interface BossData {
   id: string;
@@ -27,6 +28,9 @@ export class Boss implements Entity {
   moveDir: number = 1;
   phase: number = 1;
   stateTimer: number = 0;
+  frozenTimer: number = 0;
+
+  get isFrozen() { return this.frozenTimer > 0; }
 
   constructor(x: number, y: number, data: BossData) {
     this.x = x;
@@ -39,70 +43,87 @@ export class Boss implements Entity {
 
   get name() { return this.data.nome; }
 
+  freeze(duration: number) {
+    this.frozenTimer = Math.max(this.frozenTimer, duration);
+  }
+
   takeDamage(amount: number) {
+    if (this.isFrozen && amount > 0) {
+      this.hp -= amount * 100;
+      if (this.hp < 0) this.hp = 0;
+      return;
+    }
     this.hp -= amount;
     this.blinkTimer = 0.1;
   }
 
-  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, dmgMult?: number) => void) {
+  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
     if (this.blinkTimer > 0) this.blinkTimer -= delta;
+    if (this.frozenTimer > 0) this.frozenTimer -= delta;
     this.stateTimer += delta;
+
+    // Movement frozen logic
+    const currentDelta = this.isFrozen ? 0 : delta;
 
     // Base Movement: Stay on right side
     const targetX = 750;
     if (this.x > targetX) {
-        this.x -= 100 * delta;
+        this.x -= 100 * currentDelta;
     }
 
     // Behavior Switch
-    switch (this.data.comportamento) {
-      case 'invoca_sombras':
-        this.updateHades(delta);
-        break;
-      case 'ataque_onda':
-        this.updatePoseidon(delta);
-        break;
-      case 'ataque_rapido':
-        this.updateZeus(delta);
-        break;
-      case 'perseguicao':
-        this.updateAres(delta, playerPos);
-        break;
-      case 'desviar_inteligente':
-        this.updateAthena(delta, playerPos);
-        break;
-      case 'erratico':
-        this.updateHermes(delta);
-        break;
-      case 'precisao':
-        this.updateArtemis(delta);
-        break;
-      case 'cria_entidades':
-        this.updateHephaestus(delta);
-        break;
-      case 'vibracao_tempo':
-        this.updateChronos(delta);
-        break;
-      case 'escuridao_total':
-        this.updateNyx(delta);
-        break;
-      default:
-        this.y += this.moveDir * this.speed * delta;
-        if (this.y > 450 || this.y < 50) this.moveDir *= -1;
+    if (!this.isFrozen) {
+        switch (this.data.comportamento) {
+            case 'invoca_sombras':
+                this.updateHades(currentDelta);
+                break;
+            case 'ataque_onda':
+                this.updatePoseidon(currentDelta);
+                break;
+            case 'ataque_rapido':
+                this.updateZeus(currentDelta);
+                break;
+            case 'perseguicao':
+                this.updateAres(currentDelta, playerPos);
+                break;
+            case 'desviar_inteligente':
+                this.updateAthena(currentDelta, playerPos);
+                break;
+            case 'erratico':
+                this.updateHermes(currentDelta);
+                break;
+            case 'precisao':
+                this.updateArtemis(currentDelta);
+                break;
+            case 'cria_entidades':
+                this.updateHephaestus(currentDelta);
+                break;
+            case 'vibracao_tempo':
+                this.updateChronos(currentDelta);
+                break;
+            case 'escuridao_total':
+                this.updateNyx(currentDelta);
+                break;
+            default:
+                this.y += this.moveDir * this.speed * currentDelta;
+                if (this.y > 450 || this.y < 50) this.moveDir *= -1;
+        }
     }
 
-    // Phase Change logic (Simplified for 10 bosses)
+    // Phase Change logic
     if (this.hp < this.maxHp * 0.4 && this.phase === 1) {
         this.phase = 2;
         this.shootInterval *= 0.7;
         this.speed *= 1.2;
     }
 
-    // Simple Shooting Logic (data-driven soon)
-    this.shootTimer += delta;
-    if (this.shootTimer >= this.shootInterval) {
-      this.shootTimer = 0;
-      this.fireAttack(playerPos, spawnBullet);
+    // Simple Shooting Logic
+    if (!this.isFrozen) {
+        this.shootTimer += delta;
+        if (this.shootTimer >= this.shootInterval) {
+            this.shootTimer = 0;
+            this.fireAttack(playerPos, spawnBullet);
+        }
     }
   }
 
@@ -158,7 +179,7 @@ export class Boss implements Entity {
       this.y += Math.sin(this.stateTimer * 0.2) * this.speed * delta;
   }
 
-  private fireAttack(playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, dmgMult?: number) => void) {
+  private fireAttack(playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
       const dx = playerPos.x - this.x;
       const dy = playerPos.y - (this.y + this.height/2);
       const angle = Math.atan2(dy, dx);
@@ -185,6 +206,27 @@ export class Boss implements Entity {
     ctx.translate(this.x, this.y);
 
     if (this.blinkTimer > 0) ctx.filter = 'brightness(3)';
+    
+    // Ice Overlay
+    if (this.isFrozen) {
+        ctx.save();
+        ctx.globalAlpha = 0.4;
+        ctx.fillStyle = '#eff6ff';
+        ctx.beginPath();
+        ctx.roundRect(-10, -10, this.width + 20, this.height + 20, 15);
+        ctx.fill();
+        
+        ctx.globalAlpha = 0.8;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        for(let i=0; i<8; i++) {
+            ctx.beginPath();
+            ctx.moveTo(Math.random() * this.width, 0);
+            ctx.lineTo(Math.random() * this.width, this.height);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
 
     // Pulse
     const pulse = Math.sin(this.stateTimer * 5) * 0.1 + 1;
@@ -192,14 +234,14 @@ export class Boss implements Entity {
     // 1. Boss Bloom (Simplified)
     ctx.save();
     ctx.globalAlpha = 0.15;
-    ctx.fillStyle = this.data.tema;
+    ctx.fillStyle = this.isFrozen ? '#1e4ed8' : this.data.tema;
     ctx.beginPath();
     ctx.arc(this.width/2, this.height/2, this.width, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
     // 2. Boss Body
-    ctx.fillStyle = this.data.tema;
+    ctx.fillStyle = this.isFrozen ? '#1d4ed8' : this.data.tema;
     
     ctx.beginPath();
     if (this.data.id === 'boss_zeus') {

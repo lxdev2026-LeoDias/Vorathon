@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { usePlayerState, updatePlayerState } from '../core/Store';
 import { skillTreeSystem, SkillCategory, INITIAL_SKILL_TREE } from '../systems/skillTreeSystem';
-import { X, Bot, Rocket, Zap, Shield, ZapOff, Crosshair, Heart, Battery } from 'lucide-react';
+import { X, Bot, Rocket, Zap, Shield, ZapOff, Crosshair, Heart, Battery, Snowflake } from 'lucide-react';
 
 export const SkillTree: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const playerState = usePlayerState();
@@ -64,23 +64,21 @@ export const SkillTree: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         return (
             <div className="flex flex-col gap-2">
                 {renderNode(SkillCategory.SPECIALS, id, name, description, icon, currentLevel, 3)}
-                {isUnlocked && (
-                    <div className="flex gap-2">
-                        {[0, 1, 2].map(slot => (
-                            <button
-                                key={slot}
-                                onClick={() => skillTreeSystem.equipSpecial(id, slot)}
-                                className={`flex-1 py-1 rounded text-[10px] font-bold border ${
-                                    tree.equippedSpecials[slot] === id 
-                                    ? 'bg-amber-500 border-amber-400 text-white' 
-                                    : 'bg-slate-800 border-white/5 text-slate-400 hover:bg-slate-700'
-                                }`}
-                            >
-                                SLOT {slot + 1}
-                            </button>
-                        ))}
-                    </div>
-                )}
+                <div className="flex gap-2">
+                    {[0, 1, 2, 3].map(slot => (
+                        <button
+                            key={slot}
+                            onClick={() => skillTreeSystem.equipSpecial(id, slot)}
+                            className={`flex-1 py-1 rounded text-[10px] font-bold border ${
+                                tree.equippedSpecials[slot] === id 
+                                ? 'bg-amber-500 border-amber-400 text-white' 
+                                : 'bg-slate-800 border-white/5 text-slate-400 hover:bg-slate-700'
+                            }`}
+                        >
+                            SLOT {slot + 1}
+                        </button>
+                    ))}
+                </div>
             </div>
         );
     };
@@ -133,7 +131,7 @@ export const SkillTree: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                             <h3 className="text-xl font-bold text-white uppercase tracking-wider">Melhoria de Tiro</h3>
                         </div>
                         <div className="max-w-md">
-                            {renderNode(SkillCategory.WEAPON, 'weapon', 'Amplificador de Plasma', 'Aumenta permanentemente o dano e tamanho do projétil.', <Zap />, tree.weapon, 4)}
+                            {renderNode(SkillCategory.WEAPON, 'weapon', 'Amplificador Plasmático', 'Aumenta permanentemente o dano e tamanho do projétil.', <Zap />, tree.weapon, 4)}
                         </div>
                     </section>
 
@@ -141,12 +139,13 @@ export const SkillTree: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     <section>
                         <div className="flex items-center gap-3 mb-6">
                             <Zap className="text-amber-500" />
-                            <h3 className="text-xl font-bold text-white uppercase tracking-wider">Habilidades Ativas</h3>
+                            <h3 className="text-xl font-bold text-white uppercase tracking-wider">Habilidades Especiais</h3>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {renderSpecialNode('shockwave', 'Onda de Choque', 'Cospe uma explosão de energia ao redor da nave.', <ZapOff />, tree.specials.shockwave)}
-                            {renderSpecialNode('explosion', 'Grande Explosão', 'Cria uma supernova massiva na posição atual.', <Rocket />, tree.specials.explosion)}
-                            {renderSpecialNode('thunder', 'Chuva de Trovões', 'Raios cósmicos caem aleatoriamente sobre os inimigos.', <Zap />, tree.specials.thunder)}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {renderSpecialNode('shockwave', '⚡ Ruptura Astral', 'Cospe uma explosão de energia ao redor da nave.', <ZapOff />, tree.specials.shockwave || 0)}
+                            {renderSpecialNode('explosion', '💥 Supernova Primordial', 'Cria uma supernova massiva na posição atual.', <Rocket />, tree.specials.explosion || 0)}
+                            {renderSpecialNode('thunder', '⚡ Tempestade Celestial', 'Raios cósmicos caem aleatoriamente sobre os inimigos.', <Zap />, tree.specials.thunder || 0)}
+                            {renderSpecialNode('blizzard', '❄️ Era Glacial', 'Uma nevasca congela e explode inimigos em gelo.', <Snowflake />, tree.specials.blizzard || 0)}
                         </div>
                     </section>
 

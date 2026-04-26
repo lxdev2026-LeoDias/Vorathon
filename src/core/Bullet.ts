@@ -1,6 +1,8 @@
 import { Entity } from './Types';
 import { visualEffectSystem } from '../systems/visualEffectSystem';
 import { getPlayerState } from './Store';
+import { enemySystem } from '../systems/enemySystem';
+import { bossSystem } from '../systems/bossSystem';
 
 export enum BulletType {
     NORMAL = 'NORMAL',
@@ -58,16 +60,23 @@ export class Bullet implements Entity {
   }
 
   update(delta: number) {
-    if (this.type === BulletType.MISSILE && this.target) {
-        const dx = this.target.x - this.x;
-        const dy = this.target.y - this.y;
-        const targetAngle = Math.atan2(dy, dx);
-        
-        // Simple rotation towards target
-        let diff = targetAngle - this.angle;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        this.angle += diff * 5 * delta;
+    if (this.type === BulletType.MISSILE) {
+        // Dynamic re-targeting if current target is invalid
+        if (!this.target || (this.target as any).hp <= 0) {
+            this.findNewTarget();
+        }
+
+        if (this.target) {
+            const dx = this.target.x - this.x;
+            const dy = this.target.y - this.y;
+            const targetAngle = Math.atan2(dy, dx);
+            
+            // Simple rotation towards target
+            let diff = targetAngle - this.angle;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            this.angle += diff * 5 * delta;
+        }
     }
 
     this.x += Math.cos(this.angle) * this.speed * delta;
@@ -87,6 +96,35 @@ export class Bullet implements Entity {
             (isOverloaded || this.type !== BulletType.NORMAL) ? 4 : 1.5
         );
     }
+  }
+
+  private findNewTarget() {
+      if (bossSystem.currentBoss) {
+          this.target = bossSystem.currentBoss;
+          return;
+      }
+
+      const enemies = enemySystem.enemies.filter(e => e.hp > 0);
+      if (enemies.length > 0) {
+          // Prefer Elites, then closest
+          const elites = enemies.filter(e => e.type === 'ELITE');
+          this.target = this.findClosest(elites.length > 0 ? elites : enemies);
+      } else {
+          this.target = null;
+      }
+  }
+
+  private findClosest(list: any[]): Entity | null {
+      let closest = null;
+      let minDist = Infinity;
+      list.forEach(e => {
+          const d = Math.pow(e.x - this.x, 2) + Math.pow(e.y - this.y, 2);
+          if (d < minDist) {
+              minDist = d;
+              closest = e;
+          }
+      });
+      return closest;
   }
 
   draw(ctx: CanvasRenderingContext2D) {
@@ -134,11 +172,24 @@ export class Bullet implements Entity {
     } else if (this.type === BulletType.PLASMA) {
         const pulse = 1 + Math.sin(performance.now() / 100) * 0.1;
         ctx.fillStyle = mainColor;
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = 30; // Increased blur
         ctx.shadowColor = mainColor;
         ctx.beginPath();
         ctx.arc(0, 0, (this.width/2) * pulse, 0, Math.PI * 2);
         ctx.fill();
+        
+        // erratic discharge lines
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < 6; i++) {
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            const ang = Math.random() * Math.PI * 2;
+            const dist = (this.width/2) * (1.2 + Math.random() * 0.5);
+            ctx.lineTo(Math.cos(ang) * dist, Math.sin(ang) * dist);
+            ctx.stroke();
+        }
+
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(0, 0, (this.width/4) * pulse, 0, Math.PI * 2);

@@ -17,6 +17,7 @@ import { overloadSystem } from '../systems/overloadSystem';
 import { modeSystem } from '../systems/modeSystem';
 import { powerUpSystem } from '../systems/powerUpSystem';
 import { difficultySystem } from '../systems/difficultySystem';
+import { dialogueSystem } from '../systems/dialogueSystem';
 import { gameOverSystem, GameOverStep } from '../systems/gameOverSystem';
 import { updatePlayerState, getPlayerState, triggerFeedback, evolvePowerUp, addScore, handlePlayerDeath, resetSession, addRune, addRelic, addLife, addRankingEntry } from './Store';
 import { inputManager } from './InputManager';
@@ -37,6 +38,7 @@ export class Engine {
   private bgTime: number = 0;
   private camOffset = { x: 0, y: 0 };
   private shakeAmount: number = 0;
+  private shakeTimer: number = 0;
   private shotsCounter: number = 0;
 
   constructor(ctx: CanvasRenderingContext2D, setGameState?: (state: GameState) => void) {
@@ -90,9 +92,9 @@ export class Engine {
     requestAnimationFrame(this.loop.bind(this));
   }
 
-  private spawnBullet = (x: number, y: number, angle: number, isEnemy: boolean, extraDmgMult: number = 1) => {
+  private spawnBullet = (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type: BulletType = BulletType.NORMAL, extraDmgMult: number = 1) => {
     const pu = powerUpSystem.getEffect();
-    const color = !isEnemy ? pu.bulletColor : undefined;
+    const finalColor = color || (!isEnemy ? pu.bulletColor : undefined);
 
     if (!isEnemy) {
         this.shotsCounter++;
@@ -104,7 +106,7 @@ export class Engine {
         const count = pu.shotCount;
         for (let i = 0; i < count; i++) {
             const offset = (i - (count - 1) / 2) * spread;
-            const b = new Bullet(x, y, angle + offset, false, color);
+            const b = new Bullet(x, y, angle + offset, false, finalColor, type);
             b.width *= sizeMult;
             b.height *= sizeMult;
             b.damageMult = extraDmgMult;
@@ -115,17 +117,17 @@ export class Engine {
         if (this.shotsCounter >= 5) {
             this.shotsCounter = 0;
             if (pu.specialEffect) {
-                let type = BulletType.NORMAL;
-                if (pu.specialEffect === 'MISSILE') type = BulletType.MISSILE;
-                if (pu.specialEffect === 'PLASMA') type = BulletType.PLASMA;
-                if (pu.specialEffect === 'ARC') type = BulletType.ARC;
+                let sType = BulletType.NORMAL;
+                if (pu.specialEffect === 'MISSILE') sType = BulletType.MISSILE;
+                if (pu.specialEffect === 'PLASMA') sType = BulletType.PLASMA;
+                if (pu.specialEffect === 'ARC') sType = BulletType.ARC;
 
-                const specialBullet = new Bullet(x, y, angle, false, color, type, 3);
+                const specialBullet = new Bullet(x, y, angle, false, finalColor, sType, 3);
                 specialBullet.width *= sizeMult;
                 specialBullet.height *= sizeMult;
                 
                 // Target selection for missile
-                if (type === BulletType.MISSILE) {
+                if (sType === BulletType.MISSILE) {
                     const target = bossSystem.currentBoss || enemySystem.enemies[0] || null;
                     if (target) specialBullet.setTarget(target);
                 }
@@ -134,13 +136,13 @@ export class Engine {
             }
         }
 
-        visualEffectSystem.emitShotParticles(x, y, color || '#3b82f6');
+        visualEffectSystem.emitShotParticles(x, y, finalColor || '#3b82f6');
         runeSystem.onShoot((bx: number, by: number, ba: number) => {
-            this.bullets.push(new Bullet(bx, by, ba, false, color));
-            visualEffectSystem.emitShotParticles(bx, by, color || '#3b82f6');
+            this.bullets.push(new Bullet(bx, by, ba, false, finalColor));
+            visualEffectSystem.emitShotParticles(bx, by, finalColor || '#3b82f6');
         }, { x, y });
     } else {
-        this.bullets.push(new Bullet(x, y, angle, isEnemy));
+        this.bullets.push(new Bullet(x, y, angle, isEnemy, color, type, extraDmgMult));
     }
   };
 
@@ -163,20 +165,35 @@ export class Engine {
     this.camOffset.x += (targetCamX - this.camOffset.x) * 5 * delta;
     this.camOffset.y += (targetCamY - this.camOffset.y) * 5 * delta;
 
-    // Shake decay - 1 second duration feel
-    if (state.feedback.shake > this.shakeAmount) {
+    // Shake logic - Strict 1s duration
+    if (state.feedback.shake > 0) {
+        this.shakeTimer = 1.0; 
         this.shakeAmount = state.feedback.shake;
+        // Clear signal in store immediately
+        updatePlayerState(prev => ({ ...prev, feedback: { ...prev.feedback, shake: 0 } }));
     }
-    if (this.shakeAmount > 0) {
-        // Decrease by 20 units per second. If starting at 20, it lasts 1s.
-        this.shakeAmount -= 20 * rawDelta; 
-        if (this.shakeAmount < 0) this.shakeAmount = 0;
+
+    if (this.shakeTimer > 0) {
+        this.shakeTimer -= rawDelta;
+        if (this.shakeTimer <= 0) {
+            this.shakeTimer = 0;
+            this.shakeAmount = 0;
+        }
     }
 
     // --- STAGE PROGRESSION ---
-    const shouldSpawnBoss = stageSystem.update(delta);
+    const { shouldSpawn: shouldSpawnBoss, forceSpawnEnemies } = stageSystem.update(delta);
+    
+    if (stageSystem.isWarningBoss) {
+        // Warning feedback
+        if (Math.random() > 0.8) triggerFeedback('shake', 5);
+        if (Math.random() > 0.9) triggerFeedback('flash', 0.1);
+    }
+
     if (shouldSpawnBoss) {
         bossSystem.spawnBoss(this.ctx!.canvas.width, this.ctx!.canvas.height, stageSystem.currentStage.bossId);
+        triggerFeedback('shake', 40);
+        triggerFeedback('flash', 0.5);
     }
 
     if (bossSystem.bossDefeated && !stageSystem.stageCompleted) {
@@ -217,8 +234,10 @@ export class Engine {
     visualEffectSystem.update(delta);
 
     // Update Entities via Systems
-    // If boss is active, reduce common enemy spawns significantly
-    const spawnRateModifier = bossSystem.currentBoss ? 0.1 : 1;
+    // If boss is active OR warning is active, reduce common enemy spawns significantly
+    let spawnRateModifier = (bossSystem.currentBoss || stageSystem.isWarningBoss) ? 0 : 1;
+    if (forceSpawnEnemies) spawnRateModifier = 3; // Force more enemies if stuck
+
     enemySystem.update(delta * spawnRateModifier, this.ctx!.canvas.width, this.ctx!.canvas.height, { x: this.player.x, y: this.player.y }, this.spawnBullet);
     
     // Process Status Effects on Enemies
@@ -228,6 +247,24 @@ export class Engine {
             enemy.hp -= dmg;
             if (Math.random() < 0.1) effectsSystem.addFloatingText(enemy.x, enemy.y, "🔥", '#f97316');
         }
+    });
+
+    // Random Dialogues
+    if (Math.random() < 0.005) {
+        const sources: Array<'player' | 'summoner' | 'shooter' | 'supporter'> = ['player'];
+        if (state.skillTree.companions.summoner > 0) sources.push('summoner');
+        if (state.skillTree.companions.shooter > 0) sources.push('shooter');
+        if (state.skillTree.companions.supporter > 0) sources.push('supporter');
+        
+        const randomSource = sources[Math.floor(Math.random() * sources.length)];
+        dialogueSystem.trigger(randomSource);
+    }
+
+    dialogueSystem.update(delta, {
+        player: { x: this.player.x + this.player.width/2, y: this.player.y + this.player.height/2 },
+        summoner: { x: this.player.x - 60, y: this.player.y + this.player.height/2 },
+        shooter: { x: this.player.x - 50, y: this.player.y - 30 },
+        supporter: { x: this.player.x - 50, y: this.player.y + this.player.height + 30 }
     });
 
     bossSystem.update(delta, { x: this.player.x, y: this.player.y }, this.spawnBullet);
@@ -300,6 +337,13 @@ export class Engine {
           });
 
           if (e.hp <= 0) {
+            // Ice shatter effect - 100% chance if frozen
+            if (e.isFrozen) {
+                visualEffectSystem.emitIceShatter(e.x + e.width/2, e.y + e.height/2, 80);
+            } else {
+                visualEffectSystem.emitExplosion(e.x + e.width/2, e.y + e.height/2, e.type === 'ELITE' ? '#f59e0b' : '#ef4444', 30);
+            }
+
             // Rune death effect
             runeSystem.onDeath(e, (x: number, y: number, mult: number) => {
                 effectsSystem.addExplosion(x, y, '#ef4444', 30);
@@ -347,6 +391,8 @@ export class Engine {
             const scoreGain = Math.floor((e.type === 'ELITE' ? 100 : 15) * mods.scoreMult);
             const xpGain = Math.floor(scoreGain * diff.xpMultiplier);
 
+            stageSystem.addProgress(e.type);
+
             updatePlayerState(prev => ({
                 ...prev,
                 session: {
@@ -360,7 +406,6 @@ export class Engine {
             dropSystem.rollDrop(e.x, e.y, 40 * (mods.goldDropChance || 1), e.type === 'ELITE');
             addScore(scoreGain, e.type === 'ELITE');
             this.gainXP(xpGain);
-            visualEffectSystem.emitExplosion(e.x + e.width/2, e.y + e.height/2, e.type === 'ELITE' ? '#f59e0b' : '#ef4444', 30); // 2x base
           }
         }
       });
@@ -384,7 +429,12 @@ export class Engine {
               dropSystem.rollDrop(bossSystem.currentBoss.x, bossSystem.currentBoss.y, 100, false, true); // Boss drop
               addScore(2500, true);
               this.gainXP(500);
-              visualEffectSystem.emitExplosion(bossSystem.currentBoss.x + bossSystem.currentBoss.width/2, bossSystem.currentBoss.y + bossSystem.currentBoss.height/2, '#f59e0b', 80); // Massive 2x
+              
+              if (bossSystem.currentBoss.isFrozen) {
+                  visualEffectSystem.emitIceShatter(bossSystem.currentBoss.x + bossSystem.currentBoss.width/2, bossSystem.currentBoss.y + bossSystem.currentBoss.height/2, 150);
+              } else {
+                  visualEffectSystem.emitExplosion(bossSystem.currentBoss.x + bossSystem.currentBoss.width/2, bossSystem.currentBoss.y + bossSystem.currentBoss.height/2, '#f59e0b', 80);
+              }
           }
       }
     });
@@ -542,6 +592,7 @@ export class Engine {
       this.player.draw(this.ctx);
     }
 
+    dialogueSystem.draw(this.ctx);
     effectsSystem.draw(this.ctx);
 
     this.ctx.restore();
@@ -564,6 +615,24 @@ export class Engine {
         this.ctx.shadowColor = 'red';
         this.ctx.shadowBlur = 20;
         this.ctx.fillText('GAME OVER', 0, 0);
+        this.ctx.restore();
+    }
+
+    if (stageSystem.isWarningBoss) {
+        this.ctx.save();
+        this.ctx.translate(width / 2, height / 2);
+        const warningScale = 1 + Math.sin(performance.now() / 100) * 0.1;
+        this.ctx.scale(warningScale, warningScale);
+        
+        this.ctx.fillStyle = '#ef4444';
+        this.ctx.font = '900 60px "Inter", sans-serif';
+        this.ctx.textAlign = 'center';
+        this.ctx.shadowColor = 'rgba(239, 68, 68, 0.8)';
+        this.ctx.shadowBlur = 30;
+        this.ctx.fillText('AMEAÇA IMINENTE', 0, 0);
+        
+        this.ctx.font = '700 24px "Inter", sans-serif';
+        this.ctx.fillText('ENTIDADE DETECTADA', 0, 45);
         this.ctx.restore();
     }
 

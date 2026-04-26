@@ -11,7 +11,15 @@ let globalPlayerState = {
   skillTree: (() => {
     try {
       const saved = localStorage.getItem('nebula_forge_skillTree');
-      return saved ? JSON.parse(saved) : INITIAL_SKILL_TREE;
+      const parsed = saved ? JSON.parse(saved) : {};
+      // Deep merge with defaults to ensure new skills like 'blizzard' are present
+      return {
+          ...INITIAL_SKILL_TREE,
+          ...parsed,
+          companions: { ...INITIAL_SKILL_TREE.companions, ...(parsed.companions || {}) },
+          specials: { ...INITIAL_SKILL_TREE.specials, ...(parsed.specials || {}) },
+          attributes: { ...INITIAL_SKILL_TREE.attributes, ...(parsed.attributes || {}) }
+      };
     } catch (e) {
       return INITIAL_SKILL_TREE;
     }
@@ -66,12 +74,17 @@ const subscribers = new Set<() => void>();
 export const getPlayerState = () => globalPlayerState;
 
 export const updatePlayerState = (updater: (prev: typeof globalPlayerState) => typeof globalPlayerState) => {
-  globalPlayerState = updater(globalPlayerState);
+  const nextState = updater(globalPlayerState);
   
-  // Persistence
-  localStorage.setItem('nebula_forge_skillTree', JSON.stringify(globalPlayerState.skillTree));
-  localStorage.setItem('nebula_forge_progression', JSON.stringify(globalPlayerState.progression));
+  // Persistence: Only save if these objects changed (they are immutable-updated when modified)
+  if (nextState.skillTree !== globalPlayerState.skillTree) {
+      localStorage.setItem('nebula_forge_skillTree', JSON.stringify(nextState.skillTree));
+  }
+  if (nextState.progression !== globalPlayerState.progression) {
+      localStorage.setItem('nebula_forge_progression', JSON.stringify(nextState.progression));
+  }
 
+  globalPlayerState = nextState;
   subscribers.forEach(sub => sub());
 };
 

@@ -2,6 +2,8 @@ import { Boss, BossData } from '../core/Boss';
 import { difficultySystem } from './difficultySystem';
 import bossesData from '../data/bosses.json';
 
+import { BulletType } from '../core/Bullet';
+
 export class BossSystem {
   private availableBosses: BossData[] = (bossesData as any).bosses;
   currentBoss: Boss | null = null;
@@ -29,7 +31,7 @@ export class BossSystem {
     this.bossDefeated = false;
   }
 
-  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, dmgMult?: number) => void) {
+  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, extraDmgMult?: number) => void) {
     if (this.currentBoss) {
       this.currentBoss.update(delta, playerPos, spawnBullet);
       if (this.currentBoss.hp <= 0) {

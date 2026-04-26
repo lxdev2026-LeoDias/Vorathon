@@ -1,10 +1,11 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Heart, Zap as ZapIcon, Timer, Coins, Trophy, Flame, Snowflake, Zap, Diamond } from 'lucide-react';
+import { Heart, Zap as ZapIcon, Timer, Coins, Trophy, Flame, Snowflake, Zap, Diamond, Atom, Sparkles } from 'lucide-react';
 import { usePlayerState } from '../core/Store';
 import { bossSystem } from '../systems/bossSystem';
 import { stageSystem } from '../systems/stageSystem';
 import { PowerUpClass } from '../core/Types';
+import { synergySystem } from '../systems/synergySystem';
 
 export const HUD: React.FC = () => {
   const playerState = usePlayerState();
@@ -17,9 +18,10 @@ export const HUD: React.FC = () => {
   const getPowerUpData = () => {
       if (!activePowerUp || activePowerUp.level === 0 || !activePowerUp.class) return null;
       switch (activePowerUp.class) {
-          case PowerUpClass.FIRE: return { icon: <Flame size={18} />, color: 'text-red-500', bgColor: 'bg-red-500', label: 'FIRE' };
-          case PowerUpClass.ICE: return { icon: <Snowflake size={18} />, color: 'text-cyan-400', bgColor: 'bg-cyan-400', label: 'ICE' };
-          case PowerUpClass.ELECTRIC: return { icon: <Zap size={18} />, color: 'text-yellow-400', bgColor: 'bg-yellow-400', label: 'ELECTRIC' };
+          case PowerUpClass.FIRE: return { icon: <Flame size={18} />, color: 'text-orange-500', bgColor: 'bg-orange-500', label: 'ÍGNEO' };
+          case PowerUpClass.ICE: return { icon: <Snowflake size={18} />, color: 'text-cyan-400', bgColor: 'bg-cyan-400', label: 'GLACIAL' };
+          case PowerUpClass.ELECTRIC: return { icon: <Zap size={18} />, color: 'text-yellow-400', bgColor: 'bg-yellow-400', label: 'TEMPESTUOSO' };
+          case PowerUpClass.PLASMA: return { icon: <Atom size={18} />, color: 'text-blue-500', bgColor: 'bg-blue-600', label: 'PLASMÁTICO' };
           default: return null;
       }
   };
@@ -163,6 +165,66 @@ export const HUD: React.FC = () => {
           </motion.div>
       )}
 
+      {/* --- BOSS PROGRESS BAR (Top Center) --- */}
+      {!bossSystem.currentBoss && !stageSystem.stageCompleted && (
+          <div className="absolute top-24 left-1/2 -translate-x-1/2 w-full max-w-xl flex flex-col items-center gap-2 z-50">
+              <div className="flex justify-between w-full px-2">
+                  <span className={`text-[9px] font-black uppercase tracking-[0.5em] transition-colors ${stageSystem.bossProgress / stageSystem.MAX_PROGRESS > 0.8 ? 'text-red-500 animate-pulse' : 'text-slate-400'}`}>
+                      {stageSystem.bossProgress >= stageSystem.MAX_PROGRESS ? 'INVOCANDO BOSS' : 'AMEAÇA IMINENTE'}
+                  </span>
+                  <span className="text-[10px] font-black text-slate-400 tabular-nums">
+                      {Math.floor((stageSystem.bossProgress / stageSystem.MAX_PROGRESS) * 100)}%
+                  </span>
+              </div>
+              <div className="w-full h-2.5 bg-black/60 border border-white/5 rounded-full overflow-hidden backdrop-blur-sm shadow-2xl relative">
+                  <motion.div 
+                      key="boss-progress"
+                      initial={false}
+                      animate={{ 
+                        width: `${(stageSystem.bossProgress / stageSystem.MAX_PROGRESS) * 100}%`,
+                        backgroundColor: stageSystem.bossProgress / stageSystem.MAX_PROGRESS > 0.8 ? '#ef4444' : '#f97316'
+                      }}
+                      className="h-full relative transition-all duration-500"
+                  >
+                      {/* Pulse effect when high progress */}
+                      {stageSystem.bossProgress / stageSystem.MAX_PROGRESS > 0.8 && (
+                          <motion.div 
+                              animate={{ opacity: [0.3, 0.6, 0.3] }}
+                              transition={{ duration: 0.5, repeat: Infinity }}
+                              className="absolute inset-0 bg-white"
+                          />
+                      )}
+                      
+                      {/* Inner glow/particles */}
+                      <div className="absolute inset-0 bg-energy-segments opacity-20" />
+                      <div className="absolute top-0 right-0 w-2 h-full bg-white shadow-[0_0_15px_#fff]" />
+                      
+                      {/* Bubbling effect */}
+                      <motion.div 
+                        animate={{ y: [-10, -20], opacity: [0, 0.5, 0] }}
+                        transition={{ duration: 2, repeat: Infinity, delay: 0 }}
+                        className="absolute left-1/4 w-1 h-1 bg-white rounded-full blur-[1px]"
+                      />
+                      <motion.div 
+                        animate={{ y: [-5, -15], opacity: [0, 0.5, 0] }}
+                        transition={{ duration: 1.5, repeat: Infinity, delay: 0.5 }}
+                        className="absolute left-2/4 w-1 h-1 bg-white rounded-full blur-[1px]"
+                      />
+                      <motion.div 
+                        animate={{ y: [-8, -18], opacity: [0, 0.5, 0] }}
+                        transition={{ duration: 2.5, repeat: Infinity, delay: 1 }}
+                        className="absolute left-3/4 w-1 h-1 bg-white rounded-full blur-[1px]"
+                      />
+                  </motion.div>
+                  
+                  {/* Marker for milestones */}
+                  <div className="absolute left-[25%] top-0 bottom-0 w-px bg-white/20" />
+                  <div className="absolute left-[50%] top-0 bottom-0 w-px bg-white/20" />
+                  <div className="absolute left-[75%] top-0 bottom-0 w-px bg-white/20" />
+              </div>
+          </div>
+      )}
+
 
       {/* --- BOTTOM HUD: XP BAR & LEVEL --- */}
       <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full max-w-5xl px-8 pointer-events-none scale-100 lg:scale-110">
@@ -196,12 +258,13 @@ export const HUD: React.FC = () => {
                   <div className="flex items-end gap-6 mb-2 ml-4">
                       {/* SPECIAL SLOTS */}
                       <div className="flex gap-2 pointer-events-auto">
-                        {[0, 1, 2].map((slot, i) => {
+                        {[0, 1, 2, 3].map((slot, i) => {
                           const specId = playerState.skillTree?.equippedSpecials[slot];
-                          const keys = ['T', 'Y', 'U'];
+                          const keys = ['T', 'Y', 'U', 'I'];
                           // Actual checks for HUD feedback
                           const hasEnergy = stats.energy >= 100;
                           const isUnlocked = specId != null;
+                          const synergyBonus = isUnlocked && activePowerUp.class ? synergySystem.getSynergyBonus(activePowerUp.class, specId) : null;
                           
                           return (
                             <div key={slot} className="flex flex-col items-center gap-1 group">
@@ -210,14 +273,24 @@ export const HUD: React.FC = () => {
                                 className={`w-12 h-12 rounded-xl border-2 flex flex-col items-center justify-center backdrop-blur-md transition-all relative ${
                                   isUnlocked 
                                   ? (hasEnergy 
-                                      ? 'bg-blue-500/20 border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.4)]' 
+                                      ? (synergyBonus ? `bg-black/60 shadow-[0_0_20px_${synergyBonus.color}] scale-110 border-[3px]` : 'bg-blue-500/20 border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.4)]') 
                                       : 'bg-slate-800/40 border-slate-600 opacity-60')
                                   : 'bg-black/40 border-white/5'
                                 }`}
+                                style={synergyBonus && hasEnergy ? { borderColor: synergyBonus.color } : {}}
                               >
                                 {isUnlocked ? (
                                   <>
-                                    <span className="text-white font-black text-[10px] uppercase tracking-tighter leading-none select-none">{specId?.slice(0, 3)}</span>
+                                    <span className={`font-black text-[10px] uppercase tracking-tighter leading-none select-none ${synergyBonus ? 'text-white' : 'text-white'}`}>{specId?.slice(0, 3)}</span>
+                                    {synergyBonus && hasEnergy && (
+                                      <motion.div 
+                                        animate={{ opacity: [0.5, 1, 0.5] }}
+                                        transition={{ duration: 2, repeat: Infinity }}
+                                        className="absolute -top-1 -right-1"
+                                      >
+                                        <Sparkles size={12} style={{ color: synergyBonus.color, filter: `drop-shadow(0 0 5px ${synergyBonus.color})` }} />
+                                      </motion.div>
+                                    )}
                                     {!hasEnergy && (
                                       <div className="absolute inset-0 bg-black/60 flex items-center justify-center rounded-lg">
                                         <Zap size={14} className="text-amber-500/50" />
@@ -228,25 +301,25 @@ export const HUD: React.FC = () => {
                                   <div className="w-1 h-1 bg-white/10 rounded-full" />
                                 )}
                               </motion.div>
-                              <span className="text-[10px] font-black text-white/40 tracking-tighter group-hover:text-blue-400/60 transition-colors uppercase select-none">{keys[i]}</span>
+                              <span className={`text-[10px] font-black tracking-tighter transition-colors uppercase select-none ${synergyBonus ? 'text-emerald-400/80' : 'text-white/40 group-hover:text-blue-400/60'}`}>{keys[i]}</span>
                             </div>
                           );
                         })}
                       </div>
 
                       {/* XP TEXT */}
-                      <div className="flex-grow flex items-baseline gap-2 mb-2">
+                      <div className="flex-grow flex items-baseline gap-2 mb-2 ml-10">
                         <motion.span 
                             key={progression.exp}
                             initial={{ scale: 1.1, filter: "brightness(2)" }}
                             animate={{ scale: 1, filter: "brightness(1)" }}
-                            className="text-4xl font-black italic tracking-tighter tabular-nums text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]"
+                            className="text-3xl font-black italic tracking-tighter tabular-nums text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.4)]"
                         >
                             {progression.exp} 
                         </motion.span>
-                        <span className="text-white/30 text-xl font-black italic">/</span> 
-                        <span className="text-white/60 text-2xl font-black italic">{progression.nextLevelExp}</span>
-                        <span className="text-cyan-400 font-mono italic text-sm ml-2 tracking-[0.4em] font-black opacity-80">XP</span>
+                        <span className="text-white/30 text-lg font-black italic">/</span> 
+                        <span className="text-white/60 text-xl font-black italic">{progression.nextLevelExp}</span>
+                        <span className="text-cyan-400 font-mono italic text-xs ml-2 tracking-[0.4em] font-black opacity-80">XP</span>
                       </div>
                   </div>
 

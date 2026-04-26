@@ -88,6 +88,18 @@
   background: radial-gradient(circle at center, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
 }
 
+.logo-vignette-fire {
+  background: radial-gradient(circle at center, rgba(249, 115, 22, 0.25) 0%, transparent 70%);
+}
+
+.logo-vignette-ice {
+  background: radial-gradient(circle at center, rgba(165, 243, 252, 0.2) 0%, transparent 70%);
+}
+
+.logo-vignette-lightning {
+  background: radial-gradient(circle at center, rgba(129, 140, 248, 0.25) 0%, transparent 70%);
+}
+
 .sci-fi-button {
   clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }

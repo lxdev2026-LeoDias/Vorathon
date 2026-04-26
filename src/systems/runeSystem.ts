@@ -36,8 +36,7 @@ export class RuneSystem {
 
     mods.onHit.forEach((fx: any) => {
         if (fx.type === 'FREEZE' && enemy.type !== 'BOSS') {
-            enemy.speed = 0;
-            setTimeout(() => enemy.speed = 100, fx.duration * 1000);
+            enemy.freeze(fx.duration);
         }
         if (fx.type === 'BURN') {
             statusSystem.applyStatus(enemy.id, { type: 'BURN', duration: fx.duration, intensity: damage * fx.damageMult });

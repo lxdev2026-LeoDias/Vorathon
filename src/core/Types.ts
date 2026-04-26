@@ -87,7 +87,8 @@ export enum PlayerType {
 export enum PowerUpClass {
   FIRE = 'FIRE',
   ICE = 'ICE',
-  ELECTRIC = 'ELECTRIC'
+  ELECTRIC = 'ELECTRIC',
+  PLASMA = 'PLASMA'
 }
 
 export type PowerUpLevel = 1 | 2 | 3 | 4;

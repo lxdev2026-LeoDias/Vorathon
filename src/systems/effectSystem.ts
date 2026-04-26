@@ -14,7 +14,10 @@ export class EffectSystem {
     getModifiers() {
         const state = getPlayerState();
         const tree = state.skillTree || {};
-        const treeHash = JSON.stringify(tree);
+        
+        // Use a simpler hash that only includes fields affecting modifiers
+        // Avoid expensive JSON.stringify(tree) in the hot loop
+        const treeHash = `w:${tree.weapon}|d:${tree.attributes?.damage}|h:${tree.attributes?.hp}|e:${tree.attributes?.energy}`;
         const hash = state.equippedRunes.join('|') + '||' + state.equippedRelics.join('|') + '||' + state.equippedChaosOrbs.join('|') + '||' + treeHash;
         
         if (hash === this.lastEquippedHash) return this.activeModifiers;

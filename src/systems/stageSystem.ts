@@ -4,7 +4,6 @@ export interface Stage {
   id: string;
   name: string;
   duration: number;
-  bossSpawnTime: number;
   enemyPool: string[];
   initialSpawnRate: number;
   maxSpawnRate: number;
@@ -18,6 +17,13 @@ export class StageSystem {
   public stageTime: number = 0;
   public bossSpawned: boolean = false;
   public stageCompleted: boolean = false;
+  
+  // New Progress logic
+  public bossProgress: number = 0;
+  public readonly MAX_PROGRESS: number = 150;
+  public isWarningBoss: boolean = false;
+  public warningTimer: number = 0;
+  public lastKillTimer: number = 0;
 
   get currentStage(): Stage {
     return this.stages[this.currentStageIndex];
@@ -29,6 +35,10 @@ export class StageSystem {
     this.bossSpawned = false;
     this.stageCompleted = false;
     this.currentStageIndex = 0;
+    this.bossProgress = 0;
+    this.isWarningBoss = false;
+    this.warningTimer = 0;
+    this.lastKillTimer = 0;
   }
 
   nextStage() {
@@ -37,32 +47,53 @@ export class StageSystem {
       this.stageTime = 0;
       this.bossSpawned = false;
       this.stageCompleted = false;
+      this.bossProgress = 0;
+      this.isWarningBoss = false;
+      this.warningTimer = 0;
+      this.lastKillTimer = 0;
       console.log(`[StageSystem] Next stage ready: ${this.currentStageIndex}. stageTime: ${this.stageTime}, bossSpawned: ${this.bossSpawned}, stageCompleted: ${this.stageCompleted}`);
   }
 
-  update(delta: number): boolean {
-    if (this.stageCompleted) return false;
+  addProgress(enemyType: string) {
+    if (this.bossSpawned || this.isWarningBoss) return;
+    
+    let points = 0.5; // DEFAULT
+    if (enemyType === 'ELITE') points = 3;
+    
+    this.bossProgress = Math.min(this.MAX_PROGRESS, this.bossProgress + points);
+    this.lastKillTimer = 0; // Reset anti-trava
+  }
+
+  update(delta: number): { shouldSpawn: boolean, forceSpawnEnemies: boolean } {
+    if (this.stageCompleted) return { shouldSpawn: false, forceSpawnEnemies: false };
     
     this.stageTime += delta;
+    this.lastKillTimer += delta;
 
-    // Check boss spawn
-    const shouldSpawn = !this.bossSpawned && (
-      this.stageTime >= this.currentStage.bossSpawnTime || 
-      this.stageTime >= this.currentStage.duration // Failsafe: spawn if stage duration is reached
-    );
+    // Anti-trava logic: if no kills for 15 seconds, force spawn more enemies
+    const forceSpawnEnemies = this.lastKillTimer > 15 && !this.bossSpawned && !this.isWarningBoss;
 
-    if (shouldSpawn) {
-      console.log(`[StageSystem] Spawning boss for stage ${this.currentStage.id} (${this.currentStage.name}) at time ${this.stageTime}`);
-      this.bossSpawned = true;
-      return true; // Signal to spawn boss
+    // Handle warning sequence
+    if (this.bossProgress >= this.MAX_PROGRESS && !this.isWarningBoss && !this.bossSpawned) {
+        this.isWarningBoss = true;
+        this.warningTimer = 1.0; // 1 second warning
     }
 
-    return false;
+    if (this.isWarningBoss) {
+        this.warningTimer -= delta;
+        if (this.warningTimer <= 0) {
+            this.isWarningBoss = false;
+            this.bossSpawned = true;
+            return { shouldSpawn: true, forceSpawnEnemies: false };
+        }
+    }
+
+    return { shouldSpawn: false, forceSpawnEnemies };
   }
 
   getSpawnRate(): number {
-    // Linear interpolation between initial and max spawn rate based on duration
-    const progress = Math.min(1, this.stageTime / this.currentStage.duration);
+    // Progress-based spawn rate increase
+    const progress = Math.min(1, this.bossProgress / this.MAX_PROGRESS);
     return this.currentStage.initialSpawnRate - (this.currentStage.initialSpawnRate - this.currentStage.maxSpawnRate) * progress;
   }
 

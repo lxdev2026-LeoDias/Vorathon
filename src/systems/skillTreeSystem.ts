@@ -18,13 +18,14 @@ export interface SkillTreeState {
         shockwave: number;
         explosion: number;
         thunder: number;
+        blizzard: number;
     };
     attributes: {
         damage: number;
         hp: number;
         energy: number;
     };
-    equippedSpecials: (string | null)[]; // Up to 3
+    equippedSpecials: (string | null)[]; // Up to 4
 }
 
 export const INITIAL_SKILL_TREE: SkillTreeState = {
@@ -37,14 +38,15 @@ export const INITIAL_SKILL_TREE: SkillTreeState = {
     specials: {
         shockwave: 0,
         explosion: 0,
-        thunder: 0
+        thunder: 0,
+        blizzard: 0
     },
     attributes: {
         damage: 0,
         hp: 0,
         energy: 0
     },
-    equippedSpecials: [null, null, null]
+    equippedSpecials: [null, null, null, null]
 };
 
 class SkillTreeSystem {
@@ -57,7 +59,7 @@ class SkillTreeSystem {
         const weaponSizeBonuses = [1, 1.1, 1.25, 1.4, 1.6];
         
         return {
-            bonusDamage: weaponDmgBonuses[tree.weapon] + (tree.attributes.damage * 10),
+            bonusDamage: (weaponDmgBonuses[tree.weapon] + (tree.attributes.damage * 10)),
             weaponSizeMult: weaponSizeBonuses[tree.weapon],
             bonusHp: tree.attributes.hp * 20,
             bonusMaxEnergy: tree.attributes.energy * 20
@@ -73,24 +75,28 @@ class SkillTreeSystem {
             
             if (category === SkillCategory.COMPANIONS) {
                 const comp = { ...newTree.companions };
-                if (comp[skillId as keyof typeof comp] < 3) {
-                    comp[skillId as keyof typeof comp]++;
+                const currentVal = comp[skillId as keyof typeof comp] ?? 0;
+                if (currentVal < 3) {
+                    comp[skillId as keyof typeof comp] = currentVal + 1;
                     newTree.companions = comp;
                 } else return prev;
             } else if (category === SkillCategory.WEAPON) {
-                if (newTree.weapon < 4) {
-                    newTree.weapon++;
+                const currentVal = newTree.weapon ?? 0;
+                if (currentVal < 4) {
+                    newTree.weapon = currentVal + 1;
                 } else return prev;
             } else if (category === SkillCategory.SPECIALS) {
                 const spec = { ...newTree.specials };
-                if (spec[skillId as keyof typeof spec] < 3) {
-                    spec[skillId as keyof typeof spec]++;
+                const currentVal = spec[skillId as keyof typeof spec] ?? 0;
+                if (currentVal < 3) {
+                    spec[skillId as keyof typeof spec] = currentVal + 1;
                     newTree.specials = spec;
                 } else return prev;
             } else if (category === SkillCategory.ATTRIBUTES) {
                 const attr = { ...newTree.attributes };
-                if (skillId === 'energy' && attr.energy >= 10) return prev;
-                attr[skillId as keyof typeof attr]++;
+                const currentVal = attr[skillId as keyof typeof attr] ?? 0;
+                if (skillId === 'energy' && currentVal >= 10) return prev;
+                attr[skillId as keyof typeof attr] = currentVal + 1;
                 newTree.attributes = attr;
             }
 

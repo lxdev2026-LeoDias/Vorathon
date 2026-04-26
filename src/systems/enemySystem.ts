@@ -4,6 +4,7 @@ import { visualEffectSystem } from './visualEffectSystem';
 import { modeSystem } from './modeSystem';
 import { eventSystem } from './eventSystem';
 import { difficultySystem } from './difficultySystem';
+import { BulletType } from '../core/Bullet';
 
 export enum EnemyType {
   COMMON = 'COMMON',
@@ -26,9 +27,12 @@ export class Enemy implements Entity {
   shootInterval: number = 2;
   blinkTimer: number = 0;
   knockbackX: number = 0;
+  frozenTimer: number = 0;
   private organicTimer: number = Math.random() * 10;
   private trailTimer: number = 0;
   
+  get isFrozen() { return this.frozenTimer > 0; }
+
   constructor(x: number, y: number, type: EnemyType = EnemyType.COMMON) {
     this.id = Math.random().toString(36).substr(2, 9);
     this.x = x;
@@ -66,55 +70,69 @@ export class Enemy implements Entity {
     this.hp = this.maxHp;
   }
 
+  freeze(duration: number) {
+    this.frozenTimer = Math.max(this.frozenTimer, duration);
+  }
+
   takeDamage(amount: number) {
+    if (this.isFrozen && amount > 0) {
+      this.hp -= amount * 100; // Force immediate death while maintaining damage flow
+      if (this.hp < 0) this.hp = 0;
+      return;
+    }
     this.hp -= amount;
     this.blinkTimer = 0.1;
     this.knockbackX = 10; // Simple visual pop back
   }
 
-  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, dmgMult?: number) => void) {
+  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
     if (this.blinkTimer > 0) this.blinkTimer -= delta;
+    if (this.frozenTimer > 0) this.frozenTimer -= delta;
     if (this.knockbackX > 0) this.knockbackX *= 0.8;
     this.organicTimer += delta;
 
     // Movement
     const mode = modeSystem.getCurrentMode();
+    const currentSpeed = this.isFrozen ? 0 : this.speed;
+
     if (this.type === EnemyType.ELITE) {
       const dx = playerPos.x - (this.x - this.knockbackX);
       const dy = playerPos.y - this.y;
       const angle = Math.atan2(dy, dx);
-      this.x += Math.cos(angle) * this.speed * delta;
-      this.y += Math.sin(angle) * this.speed * delta;
+      this.x += Math.cos(angle) * currentSpeed * delta;
+      this.y += Math.sin(angle) * currentSpeed * delta;
     } else {
       switch(mode.spawnSide) {
-        case 'RIGHT': this.x -= this.speed * delta; break;
-        case 'LEFT': this.x += this.speed * delta; break;
-        case 'TOP': this.y += this.speed * delta; break;
-        case 'BOTTOM': this.y -= this.speed * delta; break;
+        case 'RIGHT': this.x -= currentSpeed * delta; break;
+        case 'LEFT': this.x += currentSpeed * delta; break;
+        case 'TOP': this.y += currentSpeed * delta; break;
+        case 'BOTTOM': this.y -= currentSpeed * delta; break;
       }
     }
 
     // Subtle organic float
-    this.y += Math.sin(this.organicTimer * 3) * 0.5;
+    if (!this.isFrozen) this.y += Math.sin(this.organicTimer * 3) * 0.5;
 
     // Trail (Double particles for 2x feel)
     this.trailTimer += delta;
-    if (this.trailTimer > 0.05) {
+    if (this.trailTimer > 0.05 && !this.isFrozen) {
         this.trailTimer = 0;
         const color = this.type === EnemyType.ELITE ? '#f59e0b66' : '#ef444466';
         visualEffectSystem.emitTrailParticles(this.x + this.width, this.y + this.height/2, color, 3);
     }
 
     // Shooting
-    this.shootTimer += delta;
-    if (this.shootTimer >= this.shootInterval) {
-      this.shootTimer = 0;
-      if (this.type === EnemyType.ELITE || Math.random() > 0.5) {
-        const dx = playerPos.x - this.x;
-        const dy = playerPos.y - this.y;
-        const angle = Math.atan2(dy, dx);
-        spawnBullet(this.x, this.y + this.height/2, angle, true);
-      }
+    if (!this.isFrozen) {
+        this.shootTimer += delta;
+        if (this.shootTimer >= this.shootInterval) {
+            this.shootTimer = 0;
+            if (this.type === EnemyType.ELITE || Math.random() > 0.5) {
+                const dx = playerPos.x - this.x;
+                const dy = playerPos.y - this.y;
+                const angle = Math.atan2(dy, dx);
+                spawnBullet(this.x, this.y + this.height/2, angle, true);
+            }
+        }
     }
   }
 
@@ -137,9 +155,15 @@ export class Enemy implements Entity {
     let color = '#ef4444';
     if (this.type === EnemyType.ELITE) { color = '#f59e0b'; }
     if (this.type === EnemyType.FAST) { color = '#10b981'; }
-    
-    // 2. Body
+
+    // 2. Body with Ice Overlay
     ctx.fillStyle = color;
+    if (this.isFrozen) {
+        ctx.fillStyle = '#60a5fa'; // Frozen state override
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = '#ffffff';
+    }
+    
     ctx.beginPath();
     ctx.moveTo(0, this.height/2);
     ctx.lineTo(this.width, 0);
@@ -147,6 +171,45 @@ export class Enemy implements Entity {
     ctx.lineTo(this.width, this.height);
     ctx.closePath();
     ctx.fill();
+
+    // 3. Ice Layer
+    if (this.isFrozen) {
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = '#f0f9ff';
+        ctx.beginPath();
+        const icePad = 4;
+        ctx.roundRect(-icePad, -icePad, this.width + icePad * 2, this.height + icePad * 2, 10);
+        ctx.fill();
+        
+        // Crystalline shine
+        const grad = ctx.createLinearGradient(0, 0, this.width, this.height);
+        grad.addColorStop(0, 'rgba(255,255,255,0.8)');
+        grad.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+        grad.addColorStop(1, 'rgba(255,255,255,0.8)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Ice cracks / Frost patterns
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        for(let i=0; i<4; i++) {
+            ctx.beginPath();
+            const startX = Math.random() * this.width;
+            const startY = Math.random() * this.height;
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(startX + (Math.random()-0.5)*20, startY + (Math.random()-0.5)*20);
+            ctx.stroke();
+        }
+
+        // Rising frost particles
+        if (Math.random() > 0.8) {
+            visualEffectSystem.emitTrailParticles(this.x + Math.random()*this.width, this.y + this.height, '#ffffff44', 2);
+        }
+
+        ctx.restore();
+    }
 
     // 3. Energy Nucleus
     ctx.fillStyle = 'white';
@@ -173,7 +236,7 @@ export class EnemySystem {
     this.spawnTimer = 0;
   }
 
-  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, dmgMult?: number) => void) {
+  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
     const mode = modeSystem.getCurrentMode();
     const diff = difficultySystem.getModifiers();
     const eventSpawnMult = eventSystem.getSpawnMultiplier();
@@ -217,9 +280,6 @@ export class EnemySystem {
 
     this.enemies.forEach(e => {
       e.update(delta, playerPos, spawnBullet);
-      if (e.hp <= 0) {
-        effectsSystem.addExplosion(e.x + e.width/2, e.y + e.height/2, e.type === EnemyType.ELITE ? '#f59e0b' : '#ef4444', e.type === EnemyType.ELITE ? 20 : 10);
-      }
     });
     
     // Remove off-screen or dead

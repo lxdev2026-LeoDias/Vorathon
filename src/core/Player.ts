@@ -9,6 +9,10 @@ import { enemySystem } from '../systems/enemySystem';
 import { bossSystem } from '../systems/bossSystem';
 import { combatSystem } from '../systems/combatSystem';
 import { effectsSystem } from '../systems/effectsSystem';
+import { dialogueSystem } from '../systems/dialogueSystem';import { synergySystem } from '../systems/synergySystem';
+import { companionSystem, CompanionType } from '../systems/companionSystem';
+import { PowerUpClass } from './Types';
+import { BulletType } from './Bullet';
 
 interface ActiveSpecial {
     id: string;
@@ -23,6 +27,7 @@ export class Player implements Entity {
   width: number = 64;
   height: number = 40;
   shootTimer: number = 0;
+  private plasmaShotCount: number = 0;
   private currentScale: number = 2.0;
 
   // Energy & Specials
@@ -31,18 +36,15 @@ export class Player implements Entity {
   private specialCooldowns: { [key: string]: number } = {};
   private specialCooldownTime: number = 3; // Minimum 3s base cooldown between specials
 
-  // Companions state
-  private blackHoleTimer: number = 0;
-  private companionShootTimer: number = 0;
-  private shieldTimer: number = 0;
   private shieldHealth: number = 0;
 
   constructor(x: number, y: number) {
     this.x = x;
     this.y = y;
+    companionSystem.init();
   }
 
-  update(delta: number, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, extraDmgMult?: number) => void) {
+  update(delta: number, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, extraDmgMult?: number) => void) {
     const state = getPlayerState();
     const mode = modeSystem.getCurrentMode();
     const tree = state.skillTree || INITIAL_SKILL_TREE;
@@ -65,8 +67,8 @@ export class Player implements Entity {
         }));
     }
 
-    // Special Skill Trigger (T, Y, U Keys)
-    const specialKeys = ['KeyT', 'KeyY', 'KeyU'];
+    // Special Skill Trigger (T, Y, U, I Keys)
+    const specialKeys = ['KeyT', 'KeyY', 'KeyU', 'KeyI'];
     specialKeys.forEach((key, index) => {
         if (inputManager.isKeyDown(key)) {
             const specialId = tree.equippedSpecials[index];
@@ -88,7 +90,14 @@ export class Player implements Entity {
     }
 
     // Update Companions
-    this.updateCompanions(delta, spawnBullet, tree);
+    companionSystem.update(delta, this.x, this.y, this.width, this.height, spawnBullet);
+    
+    // Check for shield requests from companions
+    if ((window as any).playerShieldRequest) {
+        this.shieldHealth = Math.max(this.shieldHealth, (window as any).playerShieldRequest);
+        effectsSystem.addFloatingText(this.x, this.y - 40, "SHIELD CHARGED", '#60a5fa', true);
+        delete (window as any).playerShieldRequest;
+    }
     
     const { speed, fireRate } = state.stats;
     const mods = effectSystem.getModifiers();
@@ -123,6 +132,7 @@ export class Player implements Entity {
 
     const currentSpeed = speed * mods.speedMult;
     const currentFireRate = fireRate * mods.fireRateMult;
+    const weaponBonuses = skillTreeSystem.getBonuses();
 
     const dx = inputManager.axisX;
     const dy = inputManager.axisY;
@@ -140,7 +150,40 @@ export class Player implements Entity {
       const bx = mode.direction === ScrollDirection.HORIZONTAL ? this.x + this.width : this.x + this.width / 2;
       const by = mode.direction === ScrollDirection.HORIZONTAL ? this.y + this.height / 2 : this.y;
       
-      spawnBullet(bx, by, angle, false);
+      const isPlasma = state.activePowerUp.class === PowerUpClass.PLASMA;
+      const pLevel = isPlasma ? state.activePowerUp.level : 0;
+      const plasmaDmgMults = [1, 1, 1.25, 1.30, 1.35];
+      const dmgMult = isPlasma ? plasmaDmgMults[pLevel] : 1;
+
+      if (pLevel > 0) {
+          // Level 1: dark blue (#1e3a8a), Level 2: light blue (#60a5fa), Level 3/4: dark blue (#1e3a8a)
+          const plasmaColors = [undefined, '#1e3a8a', '#60a5fa', '#1e3a8a', '#1e3a8a'];
+          const shotColor = plasmaColors[pLevel];
+
+          if (pLevel === 1) {
+              spawnBullet(bx, by, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+          } else if (pLevel === 2) {
+              spawnBullet(bx, by - 8, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by + 8, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+          } else if (pLevel === 3) {
+              spawnBullet(bx, by, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by - 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by + 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+          } else if (pLevel === 4) {
+              spawnBullet(bx, by, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by - 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by + 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+
+              this.plasmaShotCount++;
+              if (this.plasmaShotCount >= 5) {
+                  this.plasmaShotCount = 0;
+                  // Level 4: Pulse ball every 5 shots, 3x damage
+                  spawnBullet(bx, by, angle, false, '#60a5fa', BulletType.PLASMA, dmgMult * 3);
+              }
+          }
+      } else {
+          spawnBullet(bx, by, angle, false);
+      }
 
       // Handle extra projectiles bonus from Chaos Orbs
       if (mods.extraProjectiles > 0) {
@@ -162,23 +205,34 @@ export class Player implements Entity {
         stats: { ...prev.stats, energy: prev.stats.energy - 100 }
     }));
 
+    // Check for synergy
+    const bonus = synergySystem.getSynergyBonus(state.activePowerUp.class!, id);
+    const baseDuration = 5;
+    const duration = bonus ? baseDuration + bonus.durationBonus : baseDuration;
+
     this.activeSpecial = {
         id,
         level,
-        timer: 5,
-        duration: 5
+        timer: duration,
+        duration: duration
     };
 
-    visualEffectSystem.emitExplosion(this.x + this.width / 2, this.y + this.height / 2, '#3b82f6', 60);
-    effectsSystem.addFloatingText(this.x, this.y - 50, "SPECIAL ACTIVATED", '#fbbf24', true);
+    visualEffectSystem.emitExplosion(this.x + this.width / 2, this.y + this.height / 2, bonus ? bonus.color : '#3b82f6', bonus ? 100 : 60);
+    effectsSystem.addFloatingText(this.x, this.y - 50, bonus ? "SYNERGY ACTIVATED" : "SPECIAL ACTIVATED", bonus ? bonus.color : '#fbbf24', true);
+    dialogueSystem.trigger('player', id);
   }
 
   private updateSpecialEffects(delta: number) {
     if (!this.activeSpecial) return;
     
+    const state = getPlayerState();
+    const bonus = synergySystem.getSynergyBonus(state.activePowerUp.class!, this.activeSpecial.id);
+    const damageMult = bonus ? bonus.damageMult : 1.0;
+    const sizeMult = bonus ? bonus.sizeMult : 1.0;
+
     const level = this.activeSpecial.level;
     const dpsLevels = [200, 300, 400];
-    const dps = dpsLevels[level - 1];
+    const dps = dpsLevels[level - 1] * damageMult;
     const damage = dps * delta;
 
     const centerX = this.x + this.width / 2;
@@ -186,15 +240,15 @@ export class Player implements Entity {
 
     if (this.activeSpecial.id === 'shockwave') {
         // Laser logic (Rectangle to the right)
-        const laserWidth = 800; // Long laser
+        const laserWidth = 1400; // Extremely long laser
         const sizeMults = [1.1, 1.2, 1.5];
-        const laserHeight = this.height * sizeMults[level - 1];
+        const laserHeight = this.height * sizeMults[level - 1] * sizeMult;
         const laserY = centerY - laserHeight / 2;
         const laserX = this.x + this.width;
 
         // Visuals
         const colors = ['#3b82f6', '#60a5fa', 'rainbow'];
-        const color = colors[level - 1];
+        const color = bonus ? bonus.color : colors[level - 1];
         this.emitLaserVFX(laserX, centerY, laserWidth, laserHeight, color);
 
         // Damage calculation (Rectangle area)
@@ -202,39 +256,137 @@ export class Player implements Entity {
             if (e.x < laserX + laserWidth && e.x + e.width > laserX &&
                 e.y < laserY + laserHeight && e.y + e.height > laserY) {
                 e.takeDamage(damage);
-                visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, '#3b82f6');
+                
+                // Impact effects
+                if (Math.random() > (bonus ? 0.4 : 0.7)) {
+                    visualEffectSystem.emitEnergySpark(e.x + e.width / 2, e.y + e.height / 2, color === 'rainbow' ? `hsl(${Date.now() % 360}, 100%, 70%)` : '#f0f9ff');
+                }
+                visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, color === 'rainbow' ? 'white' : (bonus ? bonus.color : '#3b82f6'));
             }
         });
 
     } else if (this.activeSpecial.id === 'explosion') {
         // Aura logic (Circle around player)
-        const radiusMults = [2.0, 3.0, 4.0];
-        const radius = this.width * radiusMults[level - 1];
+        const radiusMults = [0.6, 0.9, 1.2]; // Reduced by 40% from [1.0, 1.5, 2.0]
+        const radius = this.width * radiusMults[level - 1] * sizeMult;
         
         // Visuals
-        visualEffectSystem.emitExplosion(centerX, centerY, '#f97316', 15); // Constant subtle explosions (increased)
+        visualEffectSystem.emitExplosion(centerX, centerY, bonus ? bonus.color : '#f97316', bonus ? 10 : 5); 
         
+        // Dynamic Flame and Smoke for Special
+        if (Math.random() > (bonus ? 0.1 : 0.3)) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = Math.random() * radius;
+            visualEffectSystem.emitFlame(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, bonus ? 15 : 10);
+        }
+        if (Math.random() > (bonus ? 0.5 : 0.7)) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = radius;
+            visualEffectSystem.emitSmoke(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, bonus ? bonus.color + '22' : '#ff550022', 15);
+        }
+        if (Math.random() > 0.9) {
+            visualEffectSystem.emitDistortion(centerX, centerY, radius);
+        }
+        
+        // Ring of fire (Borda viva)
+        for (let i = 0; i < (bonus ? 5 : 3); i++) {
+            const angle = Math.random() * Math.PI * 2;
+            visualEffectSystem.emitFlame(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius, bonus ? 18 : 12);
+        }
+
         // Damage
         [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
             const dist = Math.sqrt((e.x + e.width / 2 - centerX)**2 + (e.y + e.height / 2 - centerY)**2);
             if (dist < radius) {
                 e.takeDamage(damage);
-                if (Math.random() > 0.8) visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, '#f97316');
+                if (Math.random() > 0.8) visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, bonus ? bonus.color : '#f97316');
             }
         });
 
     } else if (this.activeSpecial.id === 'thunder') {
-        // Thunder logic (Random strikes on screen)
-        if (Math.random() > 0.8) {
+        // Thunder Storm logic
+        visualEffectSystem.setStormIntensity((0.5 + (level * 0.2)) * (bonus ? 1.5 : 1.0));
+        
+        // Main Bolts (Rain)
+        const chance = (0.95 - level * 0.05) - (bonus ? 0.05 : 0);
+        if (Math.random() > chance) {
             const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
-            if (targets.length > 0) {
+            let tx, ty;
+            
+            if (targets.length > 0 && Math.random() > (bonus ? 0.1 : 0.3)) {
                 const target = targets[Math.floor(Math.random() * targets.length)];
-                target.takeDamage(damage * 5); // High damage per strike instead of constant DPS
-                visualEffectSystem.emitExplosion(target.x + target.width / 2, target.y + target.height / 2, '#eab308', 60);
-                visualEffectSystem.emitShotParticles(target.x + target.width / 2, target.y + target.height / 2, '#ffffff');
-                triggerFeedback('flash', 0.2); // Screen flash for lightning
+                tx = target.x + target.width / 2;
+                ty = target.y + target.height / 2;
+                target.takeDamage(damage * (bonus ? 12 : 8)); // High impact damage
+                
+                // Impact effects
+                visualEffectSystem.emitExplosion(tx, ty, '#ffffff', bonus ? 60 : 40);
+                visualEffectSystem.emitEnergySpark(tx, ty, bonus ? bonus.color : '#eab308');
+                visualEffectSystem.emitDistortion(tx, ty, bonus ? 150 : 100);
+            } else {
+                tx = Math.random() * 1200; // Random position
+                ty = Math.random() * 800;
             }
+            
+            visualEffectSystem.emitLightningBolt(tx, -100, tx, ty, bonus ? bonus.color : '#eab308', level * sizeMult);
+            triggerFeedback('flash', bonus ? 0.25 : 0.15); 
         }
+
+        // Erratic Rays
+        if (Math.random() > (bonus ? 0.95 : 0.98)) {
+            visualEffectSystem.emitErraticRay(centerX, centerY, bonus ? bonus.color : '#a855f7');
+        }
+
+        // Damage from active erratic rays
+        visualEffectSystem.getErraticRayPositions().forEach(pos => {
+            const range = 150 * sizeMult;
+            const enemyTargets = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
+            enemyTargets.forEach(e => {
+                const dist = Math.sqrt((e.x + e.width / 2 - pos.x)**2 + (e.y + e.height / 2 - pos.y)**2);
+                if (dist < range) {
+                    e.takeDamage(damage * (bonus ? 0.75 : 0.5)); // Constant smaller damage from rays
+                    if (Math.random() > 0.9) {
+                        visualEffectSystem.emitEnergySpark(e.x + e.width / 2, e.y + e.height / 2, bonus ? bonus.color : '#a855f7');
+                    }
+                }
+            });
+        });
+    } else if (this.activeSpecial.id === 'blizzard') {
+        const level = this.activeSpecial.level;
+        
+        // Initial Impact Burst
+        if (this.activeSpecial.timer >= this.activeSpecial.duration - 0.1) {
+            visualEffectSystem.emitIceBurst(centerX, centerY, 400 * sizeMult, bonus ? bonus.color : '#60a5fa');
+            triggerFeedback('flash', 0.4);
+            triggerFeedback('shake', 10);
+        }
+
+        // Global blizzard visuals scaled by level
+        const snowflakeCount = (15 + level * 15) * (bonus ? 2 : 1);
+        for (let i = 0; i < snowflakeCount; i++) {
+            visualEffectSystem.emitSnowflake(Math.random() * 2000, -100, level * sizeMult);
+        }
+
+        // Blizzard effects on entities
+        const allEntities = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
+        allEntities.forEach((e: any) => {
+            // Progressive slowdown and freeze
+            const distance = Math.sqrt((e.x - centerX)**2 + (e.y - centerY)**2);
+            const intensityMult = 1 - Math.min(1, distance / (800 * sizeMult));
+            
+            e.freeze((bonus ? 0.4 : 0.3) * intensityMult); 
+            e.takeDamage(damage);
+            
+            // Visual freeze/ice particles
+            if (Math.random() > (bonus ? 0.3 : 0.5)) {
+                visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, bonus ? bonus.color : '#93c5fd');
+            }
+            if (Math.random() > (bonus ? 0.85 : 0.92) - level * 0.01) {
+                visualEffectSystem.emitExplosion(e.x + e.width / 2, e.y + e.height / 2, '#ffffff', bonus ? 4 : 2);
+                visualEffectSystem.emitIceShatter(e.x + e.width / 2, e.y + e.height / 2, bonus ? 25 : 15);
+                if (Math.random() > 0.8) triggerFeedback('shake', 1 * sizeMult);
+            }
+        });
     }
   }
 
@@ -247,67 +399,6 @@ export class Player implements Entity {
     }
   }
 
-  private updateCompanions(delta: number, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, extraDmgMult?: number) => void, tree: any) {
-    // Summoner
-    if (tree.companions.summoner > 0) {
-        this.blackHoleTimer += delta;
-        const spawnInterval = tree.companions.summoner >= 3 ? 4 : 6;
-        if (this.blackHoleTimer >= spawnInterval) {
-            this.blackHoleTimer = 0;
-            const bhX = this.x + this.width + 100 + Math.random() * 200;
-            const bhY = this.y + this.height/2 + (Math.random() - 0.5) * 200;
-            
-            // Effect
-            visualEffectSystem.emitExplosion(bhX, bhY, '#a855f7', 150);
-            
-            // Functional pull and damage
-            const pullRadius = 300;
-            const pullForce = 200;
-            const pullDmg = 100 * tree.companions.summoner;
-            
-            enemySystem.enemies.forEach(e => {
-                const dist = Math.sqrt((e.x - bhX)**2 + (e.y - bhY)**2);
-                if (dist < pullRadius) {
-                    const angle = Math.atan2(bhY - e.y, bhX - e.x);
-                    e.x += Math.cos(angle) * pullForce * delta;
-                    e.y += Math.sin(angle) * pullForce * delta;
-                    e.takeDamage(pullDmg * delta);
-                }
-            });
-        }
-    }
-
-    // Shooter
-    if (tree.companions.shooter > 0) {
-        this.companionShootTimer += delta;
-        if (this.companionShootTimer >= 0.5) {
-            this.companionShootTimer = 0;
-            const bx = this.x - 20;
-            const by = this.y + this.height / 2;
-            
-            spawnBullet(bx, by, 0, false, 0.5);
-            if (tree.companions.shooter >= 2) spawnBullet(bx, by, -0.4, false, 0.5);
-            if (tree.companions.shooter >= 3) spawnBullet(bx, by, 0.4, false, 0.5);
-        }
-    }
-
-    // Supporter
-    if (tree.companions.supporter > 0) {
-        const cooldowns = [25, 20, 15];
-        const maxShieldValues = [50, 100, 200];
-        const cd = cooldowns[tree.companions.supporter - 1];
-        const maxShield = maxShieldValues[tree.companions.supporter - 1];
-
-        if (this.shieldHealth <= 0) {
-            this.shieldTimer += delta;
-            if (this.shieldTimer >= cd) {
-                this.shieldTimer = 0;
-                this.shieldHealth = maxShield;
-                effectsSystem.addFloatingText(this.x, this.y - 40, "SHIELD CHARGED", '#60a5fa', true);
-            }
-        }
-    }
-  }
 
   draw(ctx: CanvasRenderingContext2D) {
     const { width: cW, height: cH } = ctx.canvas;
@@ -333,6 +424,11 @@ export class Player implements Entity {
         const trailX = mode.direction === ScrollDirection.HORIZONTAL ? this.x : this.x + this.width / 2;
         const trailY = mode.direction === ScrollDirection.HORIZONTAL ? this.y + this.height / 2 : this.y + this.height;
         visualEffectSystem.emitTrailParticles(trailX, trailY, isOverloaded ? '#60a5fa44' : '#3b82f622', isOverloaded ? 5 : 3);
+        
+        // Ship smoke effect
+        if (Math.random() > 0.6) {
+            visualEffectSystem.emitSmoke(trailX, trailY, isOverloaded ? '#60a5fa22' : '#ffffff11', 8);
+        }
     }
 
     // Draw Companions
@@ -392,77 +488,41 @@ export class Player implements Entity {
         const level = this.activeSpecial.level;
         
         if (this.activeSpecial.id === 'shockwave') {
-            const laserWidth = 800;
+            const time = this.activeSpecial.duration > 0 ? this.activeSpecial.timer / this.activeSpecial.duration : 0;
+            const laserWidth = ctx.canvas.width * 0.9;
             const sizeMults = [1.1, 1.2, 1.5];
             const laserHeight = this.height * sizeMults[level - 1];
             const colors = ['#3b82f6', '#60a5fa', 'cyan'];
-            const color = level === 3 ? `hsl(${time * 360}, 100%, 70%)` : colors[level - 1];
+            const color = colors[level - 1];
 
-            ctx.save();
-            
-            // 1. Muzzle Flash (At ship nose)
-            const flashSize = 30 + Math.sin(time * 30) * 10;
-            const flashGrad = ctx.createRadialGradient(this.x + this.width, centerY, 0, this.x + this.width, centerY, flashSize);
-            flashGrad.addColorStop(0, 'white');
-            flashGrad.addColorStop(0.3, color);
-            flashGrad.addColorStop(1, 'transparent');
-            ctx.fillStyle = flashGrad;
-            ctx.beginPath();
-            ctx.arc(this.x + this.width, centerY, flashSize, 0, Math.PI * 2);
-            ctx.fill();
+            // Use the new hardened beam drawing from visualEffectSystem
+            visualEffectSystem.drawShockwaveBeam(ctx, this.x + this.width, centerY, laserWidth, laserHeight, color, level, time);
 
-            // 2. Lens Flare (Muzzle)
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2;
-            ctx.globalAlpha = 0.5;
-            for(let i=0; i<4; i++) {
-                const angle = time * 2 + (i * Math.PI / 2);
+            // Muzzle Flash / Core concentrate at ship nose
+            const flashSize = Math.max(0.1, 40 + Math.sin(time * 40) * 15);
+            if (Number.isFinite(flashSize) && Number.isFinite(this.x) && Number.isFinite(this.width) && Number.isFinite(centerY)) {
+                const flashGrad = ctx.createRadialGradient(this.x + this.width, centerY, 0, this.x + this.width, centerY, flashSize);
+                flashGrad.addColorStop(0, 'white');
+                flashGrad.addColorStop(0.4, level === 3 ? 'cyan' : color);
+                flashGrad.addColorStop(1, 'transparent');
+                
+                ctx.save();
+                ctx.fillStyle = flashGrad;
                 ctx.beginPath();
-                ctx.moveTo(this.x + this.width - Math.cos(angle) * flashSize * 1.5, centerY - Math.sin(angle) * flashSize * 1.5);
-                ctx.lineTo(this.x + this.width + Math.cos(angle) * flashSize * 1.5, centerY + Math.sin(angle) * flashSize * 1.5);
-                ctx.stroke();
+                ctx.arc(this.x + this.width, centerY, flashSize, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
             }
 
-            // 3. Main Beam
-            const grad = ctx.createLinearGradient(this.x + this.width, 0, this.x + this.width + laserWidth, 0);
-            grad.addColorStop(0, color);
-            grad.addColorStop(0.5, color);
-            grad.addColorStop(1, 'transparent');
-            
-            ctx.fillStyle = grad;
-            ctx.globalAlpha = 0.4 + Math.sin(time * 25) * 0.2;
-            ctx.beginPath();
-            ctx.roundRect(this.x + this.width, centerY - laserHeight/1.5, laserWidth, laserHeight * 1.3, 5);
-            ctx.fill();
-            
-            // 4. Core Beam (White/Bright)
-            ctx.fillStyle = 'white';
-            ctx.globalAlpha = 0.8 + Math.sin(time * 40) * 0.1;
-            ctx.beginPath();
-            ctx.roundRect(this.x + this.width, centerY - laserHeight/4, laserWidth, laserHeight/2, 5);
-            ctx.fill();
-
-            // 5. Tip Effect (Glow at the end of visible beam)
-            const tipX = this.x + this.width + laserWidth * 0.8;
-            const tipGrad = ctx.createRadialGradient(tipX, centerY, 0, tipX, centerY, laserHeight * 2);
-            tipGrad.addColorStop(0, color);
-            tipGrad.addColorStop(1, 'transparent');
-            ctx.fillStyle = tipGrad;
-            ctx.globalAlpha = 0.3;
-            ctx.beginPath();
-            ctx.arc(tipX, centerY, laserHeight * 2, 0, Math.PI * 2);
-            ctx.fill();
-
-            ctx.restore();
-
         } else if (this.activeSpecial.id === 'explosion') {
-            const radiusMults = [2.0, 3.0, 4.0];
+            const radiusMults = [0.6, 0.9, 1.2]; // Match updated scale
             const radius = this.width * radiusMults[level - 1];
             
             ctx.save();
+            // Intense core
             const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
-            grad.addColorStop(0, 'rgba(249, 115, 22, 0.8)');
-            grad.addColorStop(0.7, 'rgba(249, 115, 22, 0.2)');
+            grad.addColorStop(0, 'rgba(255, 100, 0, 0.9)');
+            grad.addColorStop(0.5, 'rgba(249, 115, 22, 0.4)');
             grad.addColorStop(1, 'transparent');
             
             ctx.fillStyle = grad;
@@ -470,30 +530,44 @@ export class Player implements Entity {
             ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
             ctx.fill();
 
-            // Fire ring
+            // Border fire effect (Simulated with rotating gradient)
             ctx.strokeStyle = '#f97316';
-            ctx.lineWidth = 4;
-            ctx.setLineDash([10, 5]);
-            ctx.lineDashOffset = -time * 100;
+            ctx.lineWidth = 6;
+            ctx.setLineDash([15, 8]);
+            ctx.lineDashOffset = -time * 150;
             ctx.beginPath();
-            ctx.arc(centerX, centerY, radius * 0.9, 0, Math.PI * 2);
+            ctx.arc(centerX, centerY, radius * 0.95, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Extra glow for boarder
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.lineWidth = 12;
+            ctx.strokeStyle = '#fbbf24';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
+
+            ctx.restore();
         } else if (this.activeSpecial.id === 'thunder') {
-            // Enhanced Thunder Visuals
+            // Enhanced Thunder Visuals - Ship Overcharge effect
             ctx.save();
             
             // 1. Electrical arcs on ship
-            ctx.strokeStyle = '#eab308';
+            ctx.strokeStyle = level === 3 ? '#ffffff' : '#eab308';
             ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#eab308';
+            
             for(let i=0; i<3; i++) {
                 ctx.beginPath();
                 let lastX = centerX + (Math.random() - 0.5) * this.width;
                 let lastY = centerY + (Math.random() - 0.5) * this.height;
                 ctx.moveTo(lastX, lastY);
                 for(let j=0; j<3; j++) {
-                    const nx = lastX + (Math.random() - 0.5) * 40;
-                    const ny = lastY + (Math.random() - 0.5) * 40;
+                    const nx = lastX + (Math.random() - 0.5) * 60;
+                    const ny = lastY + (Math.random() - 0.5) * 60;
                     ctx.lineTo(nx, ny);
                     lastX = nx;
                     lastY = ny;
@@ -501,75 +575,29 @@ export class Player implements Entity {
                 ctx.stroke();
             }
 
-            // 2. Global screen flicker (very faint)
-            if (Math.random() > 0.95) {
-                ctx.fillStyle = 'rgba(234, 179, 8, 0.1)';
-                ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-            }
-
-            // 3. Lightning Bolts (triggered periodically in draw to match update logic)
-            // Note: Exact target matching is handled in update, here we just draw aesthetics
-            if (Math.random() > 0.8) {
-                const targetX = centerX + (Math.random() - 0.5) * 1000;
-                const targetY = centerY + (Math.random() - 0.5) * 800;
-                
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 3;
-                ctx.shadowBlur = 15;
-                ctx.shadowColor = '#eab308';
-                
-                ctx.beginPath();
-                ctx.moveTo(targetX + (Math.random()-0.5)*200, 0); // From top
-                let lx = targetX;
-                let ly = 0;
-                const segments = 10;
-                for(let s=0; s<segments; s++) {
-                    const nx = targetX + (Math.random() - 0.5) * 80;
-                    const ny = (s + 1) * (targetY / segments);
-                    ctx.lineTo(nx, ny);
-                    lx = nx;
-                    ly = ny;
-                }
-                ctx.stroke();
-                
-                // Strike point explosion
-                ctx.fillStyle = '#eab308';
-                ctx.beginPath();
-                ctx.arc(lx, ly, 15, 0, Math.PI * 2);
-                ctx.fill();
-            }
+            // 2. Aura pulse
+            const auraSize = this.width * (1.2 + Math.sin(time * 20) * 0.2);
+            const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, auraSize);
+            grad.addColorStop(0, '#eab30844');
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, auraSize, 0, Math.PI * 2);
+            ctx.fill();
             
             ctx.restore();
+        } else if (this.activeSpecial.id === 'blizzard') {
+            const state = getPlayerState();
+            const bonus = synergySystem.getSynergyBonus(state.activePowerUp.class!, this.activeSpecial.id);
+            const sizeMult = bonus ? bonus.sizeMult : 1.0;
+            visualEffectSystem.drawBlizzardEffect(ctx, time, this.activeSpecial.level, bonus?.color);
+            visualEffectSystem.drawIceFloorEffect(ctx, centerX, centerY, 150 * sizeMult, time);
         }
     }
   }
 
   private drawCompanions(ctx: CanvasRenderingContext2D, time: number, tree: any) {
-    const drawBot = (x: number, y: number, color: string, icon: string) => {
-        ctx.save();
-        ctx.translate(x, y);
-        const hover = Math.sin(time * 4) * 5;
-        ctx.translate(0, hover);
-        
-        ctx.fillStyle = '#1e293b';
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(-10, -10, 20, 20, 5);
-        ctx.fill();
-        ctx.stroke();
-        
-        ctx.fillStyle = color;
-        ctx.font = '10px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(icon, 0, 4);
-        ctx.restore();
-    };
-
-    // Positions: 1 behind, 1 top-behind, 1 bottom-behind
-    if (tree.companions.summoner > 0) drawBot(this.x - 40, this.y + this.height / 2, '#a855f7', '🌀');
-    if (tree.companions.shooter > 0) drawBot(this.x - 30, this.y - 20, '#f97316', '🔥');
-    if (tree.companions.supporter > 0) drawBot(this.x - 30, this.y + this.height + 20, '#60a5fa', '🛡️');
+    companionSystem.draw(ctx);
   }
 
   private drawShip(ctx: CanvasRenderingContext2D, isOverloaded: boolean, time: number) {
@@ -633,9 +661,10 @@ export class Player implements Entity {
     const { activePowerUp } = getPlayerState();
     let coreColor = isOverloaded ? '#60a5fa' : '#22c55e';
     
-    if (activePowerUp.class === 'FIRE') coreColor = '#f97316';
-    if (activePowerUp.class === 'ICE') coreColor = '#38bdf8';
-    if (activePowerUp.class === 'ELECTRIC') coreColor = '#eab308';
+    if (activePowerUp.class === PowerUpClass.FIRE) coreColor = '#f97316';
+    if (activePowerUp.class === PowerUpClass.ICE) coreColor = '#38bdf8';
+    if (activePowerUp.class === PowerUpClass.ELECTRIC) coreColor = '#eab308';
+    if (activePowerUp.class === PowerUpClass.PLASMA) coreColor = '#60a5fa';
 
     ctx.fillStyle = coreColor;
     ctx.beginPath();
