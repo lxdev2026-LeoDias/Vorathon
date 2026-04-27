@@ -1,6 +1,7 @@
 import { Entity } from './Types';
 import { visualEffectSystem } from '../systems/visualEffectSystem';
-import { getPlayerState } from './Store';
+import { getPlayerState, updatePlayerState } from './Store';
+import { difficultySystem } from '../systems/difficultySystem';
 import { enemySystem } from '../systems/enemySystem';
 import { bossSystem } from '../systems/bossSystem';
 
@@ -59,7 +60,7 @@ export class Bullet implements Entity {
       this.target = target;
   }
 
-  update(delta: number) {
+  update(delta: number, playerPos?: { x: number, y: number }) {
     if (this.type === BulletType.MISSILE) {
         // Dynamic re-targeting if current target is invalid
         if (!this.target || (this.target as any).hp <= 0) {
@@ -77,6 +78,20 @@ export class Bullet implements Entity {
             while (diff > Math.PI) diff -= Math.PI * 2;
             this.angle += diff * 5 * delta;
         }
+    }
+
+    // Nightmare+ Tracking for enemy bullets
+    if (this.isEnemyBullet && difficultySystem.getModifiers().hasProjectileTracking && playerPos) {
+        const dx = playerPos.x - this.x;
+        const dy = playerPos.y - this.y;
+        const targetAngle = Math.atan2(dy, dx);
+        
+        let diff = targetAngle - this.angle;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        
+        // Slight adjustment towards player
+        this.angle += diff * 0.5 * delta;
     }
 
     this.x += Math.cos(this.angle) * this.speed * delta;

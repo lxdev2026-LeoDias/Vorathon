@@ -45,7 +45,7 @@ export class Enemy implements Entity {
     switch(type) {
       case EnemyType.ELITE:
         this.speed = 60 * diff.enemySpeedMultiplier * eventAggro;
-        this.maxHp = 90 * diff.enemyHealthMultiplier;
+        this.maxHp = 90 * diff.enemyHealthMultiplier * diff.eliteHealthMultiplier;
         this.damage = 25 * diff.enemyDamageMultiplier;
         this.width = 75;
         this.height = 75;

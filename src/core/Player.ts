@@ -33,10 +33,15 @@ export class Player implements Entity {
   // Energy & Specials
   private energyRegenTimer: number = 0;
   private activeSpecial: ActiveSpecial | null = null;
+  private isSpecialActive: boolean = false; // Explicit lock as requested
+  private currentSpecial: string | null = null; // Track current special name
   private specialCooldowns: { [key: string]: number } = {};
   private specialCooldownTime: number = 3; // Minimum 3s base cooldown between specials
 
   private shieldHealth: number = 0;
+  private shieldMaxHealth: number = 0;
+  private shieldRipples: { angle: number, life: number }[] = [];
+  private shieldScale: number = 0;
 
   constructor(x: number, y: number) {
     this.x = x;
@@ -56,7 +61,7 @@ export class Player implements Entity {
         }
     });
 
-    // Energy Regeneration: 100 every 30s = ~3.33 per second
+    // Energy Regeneration
     this.energyRegenTimer += delta;
     if (this.energyRegenTimer >= 1) {
         this.energyRegenTimer = 0;
@@ -72,9 +77,17 @@ export class Player implements Entity {
     specialKeys.forEach((key, index) => {
         if (inputManager.isKeyDown(key)) {
             const specialId = tree.equippedSpecials[index];
-            // Only trigger if energy >= 100 AND no special is currently active AND cooldown is off
-            if (specialId && !this.activeSpecial && (this.specialCooldowns[specialId] || 0) <= 0) {
-                this.useSpecial(specialId, tree.specials[specialId as keyof typeof tree.specials]);
+            if (specialId) {
+                // Check if blocked
+                if (this.isSpecialActive) {
+                    // Only log once if it's a different special or first attempt
+                    return; 
+                }
+                
+                if ((this.specialCooldowns[specialId] || 0) <= 0) {
+                    console.log(`Tentativa de ativar: [${specialId}]`);
+                    this.useSpecial(specialId, tree.specials[specialId as keyof typeof tree.specials]);
+                }
             }
         }
     });
@@ -84,8 +97,16 @@ export class Player implements Entity {
         this.updateSpecialEffects(delta);
         if (this.activeSpecial.timer <= 0) {
             const finishedId = this.activeSpecial.id;
+            console.log(`Finalizada: [${finishedId}]`);
             this.activeSpecial = null;
+            this.isSpecialActive = false;
+            this.currentSpecial = null;
             this.specialCooldowns[finishedId] = this.specialCooldownTime;
+            
+            // Reset storm intensity when thunder ends
+            if (finishedId === 'thunder') {
+                visualEffectSystem.setStormIntensity(0);
+            }
         }
     }
 
@@ -94,9 +115,22 @@ export class Player implements Entity {
     
     // Check for shield requests from companions
     if ((window as any).playerShieldRequest) {
-        this.shieldHealth = Math.max(this.shieldHealth, (window as any).playerShieldRequest);
-        effectsSystem.addFloatingText(this.x, this.y - 40, "SHIELD CHARGED", '#60a5fa', true);
+        const amount = (window as any).playerShieldRequest;
+        this.shieldHealth = amount;
+        this.shieldMaxHealth = amount;
+        this.shieldScale = 0; // Trigger expansion animation
+        effectsSystem.addFloatingText(this.x, this.y - 40, "DOME PROTECTOR ACTIVATED", '#06b6d4', true);
+        visualEffectSystem.emitExplosion(this.x + this.width / 2, this.y + this.height / 2, '#06b6d4', 40);
         delete (window as any).playerShieldRequest;
+    }
+
+    // Shield life and effects
+    if (this.shieldHealth > 0) {
+        this.shieldScale += (1.0 - this.shieldScale) * 10 * delta;
+        this.shieldRipples.forEach(r => r.life -= delta * 2);
+        this.shieldRipples = this.shieldRipples.filter(r => r.life > 0);
+    } else {
+        this.shieldScale = 0;
     }
     
     const { speed, fireRate } = state.stats;
@@ -200,9 +234,19 @@ export class Player implements Entity {
     const state = getPlayerState();
     if (state.stats.energy < 100) return;
 
+    if (this.isSpecialActive) {
+        console.log(`Bloqueada (já existe ativa): [${id}]`);
+        return;
+    }
+
+    console.log(`Ativada: [${id}]`);
+    this.isSpecialActive = true;
+    this.currentSpecial = id;
+
     updatePlayerState(prev => ({
         ...prev,
-        stats: { ...prev.stats, energy: prev.stats.energy - 100 }
+        stats: { ...prev.stats, energy: prev.stats.energy - 100 },
+        feedback: { ...prev.feedback, flash: 0.2 } // Visual impact flash
     }));
 
     // Check for synergy
@@ -217,9 +261,10 @@ export class Player implements Entity {
         duration: duration
     };
 
-    visualEffectSystem.emitExplosion(this.x + this.width / 2, this.y + this.height / 2, bonus ? bonus.color : '#3b82f6', bonus ? 100 : 60);
+    visualEffectSystem.emitExplosion(this.x + this.width / 2, this.y + this.height / 2, bonus ? bonus.color : '#3b82f6', bonus ? 120 : 80);
     effectsSystem.addFloatingText(this.x, this.y - 50, bonus ? "SYNERGY ACTIVATED" : "SPECIAL ACTIVATED", bonus ? bonus.color : '#fbbf24', true);
     dialogueSystem.trigger('player', id);
+    triggerFeedback('shake', 10);
   }
 
   private updateSpecialEffects(delta: number) {
@@ -231,7 +276,7 @@ export class Player implements Entity {
     const sizeMult = bonus ? bonus.sizeMult : 1.0;
 
     const level = this.activeSpecial.level;
-    const dpsLevels = [200, 300, 400];
+    const dpsLevels = [250, 400, 600]; // Increased DPS for more power feel
     const dps = dpsLevels[level - 1] * damageMult;
     const damage = dps * delta;
 
@@ -239,159 +284,107 @@ export class Player implements Entity {
     const centerY = this.y + this.height / 2;
 
     if (this.activeSpecial.id === 'shockwave') {
-        // Laser logic (Rectangle to the right)
-        const laserWidth = 1400; // Extremely long laser
-        const sizeMults = [1.1, 1.2, 1.5];
+        const laserWidth = 1600; 
+        const sizeMults = [1.2, 1.4, 1.8];
         const laserHeight = this.height * sizeMults[level - 1] * sizeMult;
         const laserY = centerY - laserHeight / 2;
         const laserX = this.x + this.width;
 
-        // Visuals
-        const colors = ['#3b82f6', '#60a5fa', 'rainbow'];
+        const colors = ['#facc15', '#eab308', 'rainbow'];
         const color = bonus ? bonus.color : colors[level - 1];
         this.emitLaserVFX(laserX, centerY, laserWidth, laserHeight, color);
 
-        // Damage calculation (Rectangle area)
+        // EXTRA POWER EFFECTS: Screen shake and subtle flares
+        if (Math.random() > 0.8) {
+           const ay = centerY + (Math.random() - 0.5) * laserHeight;
+           visualEffectSystem.emitEnergySpark(laserX + Math.random() * 200, ay, '#ffffff');
+        }
+
         [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
             if (e.x < laserX + laserWidth && e.x + e.width > laserX &&
                 e.y < laserY + laserHeight && e.y + e.height > laserY) {
                 e.takeDamage(damage);
-                
-                // Impact effects
-                if (Math.random() > (bonus ? 0.4 : 0.7)) {
-                    visualEffectSystem.emitEnergySpark(e.x + e.width / 2, e.y + e.height / 2, color === 'rainbow' ? `hsl(${Date.now() % 360}, 100%, 70%)` : '#f0f9ff');
+                if (Math.random() > 0.4) {
+                    visualEffectSystem.emitEnergySpark(e.x + e.width / 2, e.y + e.height / 2, '#ffffff');
+                    visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, '#eab308');
                 }
-                visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, color === 'rainbow' ? 'white' : (bonus ? bonus.color : '#3b82f6'));
             }
         });
 
+        triggerFeedback('shake', 3 * sizeMult);
     } else if (this.activeSpecial.id === 'explosion') {
-        // Aura logic (Circle around player)
-        const radiusMults = [0.6, 0.9, 1.2]; // Reduced by 40% from [1.0, 1.5, 2.0]
+        const radiusMults = [0.8, 1.2, 1.6]; 
         const radius = this.width * radiusMults[level - 1] * sizeMult;
         
-        // Visuals
-        visualEffectSystem.emitExplosion(centerX, centerY, bonus ? bonus.color : '#f97316', bonus ? 10 : 5); 
+        visualEffectSystem.emitExplosion(centerX, centerY, bonus ? bonus.color : '#f97316', 8); 
         
-        // Dynamic Flame and Smoke for Special
-        if (Math.random() > (bonus ? 0.1 : 0.3)) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = Math.random() * radius;
-            visualEffectSystem.emitFlame(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, bonus ? 15 : 10);
-        }
-        if (Math.random() > (bonus ? 0.5 : 0.7)) {
+        if (Math.random() > 0.3) {
             const angle = Math.random() * Math.PI * 2;
             const dist = radius;
-            visualEffectSystem.emitSmoke(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, bonus ? bonus.color + '22' : '#ff550022', 15);
-        }
-        if (Math.random() > 0.9) {
-            visualEffectSystem.emitDistortion(centerX, centerY, radius);
-        }
-        
-        // Ring of fire (Borda viva)
-        for (let i = 0; i < (bonus ? 5 : 3); i++) {
-            const angle = Math.random() * Math.PI * 2;
-            visualEffectSystem.emitFlame(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius, bonus ? 18 : 12);
+            visualEffectSystem.emitFlame(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, 15);
         }
 
-        // Damage
         [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
             const dist = Math.sqrt((e.x + e.width / 2 - centerX)**2 + (e.y + e.height / 2 - centerY)**2);
             if (dist < radius) {
                 e.takeDamage(damage);
-                if (Math.random() > 0.8) visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, bonus ? bonus.color : '#f97316');
             }
         });
 
     } else if (this.activeSpecial.id === 'thunder') {
-        // Thunder Storm logic
-        visualEffectSystem.setStormIntensity((0.5 + (level * 0.2)) * (bonus ? 1.5 : 1.0));
+        visualEffectSystem.setStormIntensity((0.7 + (level * 0.3)));
         
-        // Main Bolts (Rain)
-        const chance = (0.95 - level * 0.05) - (bonus ? 0.05 : 0);
-        if (Math.random() > chance) {
+        // LIGHTNING STORM (Tempestade Celestial) - 10%/40%/50% Distribution
+        if (Math.random() > (0.6 - level * 0.1)) { // Frequency based on level
+            const rand = Math.random();
+            let targetX = 0;
+            let targetY = 0;
+            
             const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
-            let tx, ty;
-            
-            if (targets.length > 0 && Math.random() > (bonus ? 0.1 : 0.3)) {
+            const shouldTarget = Math.random() > 0.5 && targets.length > 0;
+
+            if (shouldTarget) {
                 const target = targets[Math.floor(Math.random() * targets.length)];
-                tx = target.x + target.width / 2;
-                ty = target.y + target.height / 2;
-                target.takeDamage(damage * (bonus ? 12 : 8)); // High impact damage
-                
-                // Impact effects
-                visualEffectSystem.emitExplosion(tx, ty, '#ffffff', bonus ? 60 : 40);
-                visualEffectSystem.emitEnergySpark(tx, ty, bonus ? bonus.color : '#eab308');
-                visualEffectSystem.emitDistortion(tx, ty, bonus ? 150 : 100);
+                targetX = target.x + target.width / 2;
+                targetY = target.y + target.height / 2;
+                target.takeDamage(damage * 12); // High impact damage
             } else {
-                tx = Math.random() * 1200; // Random position
-                ty = Math.random() * 800;
-            }
-            
-            visualEffectSystem.emitLightningBolt(tx, -100, tx, ty, bonus ? bonus.color : '#eab308', level * sizeMult);
-            triggerFeedback('flash', bonus ? 0.25 : 0.15); 
-        }
-
-        // Erratic Rays
-        if (Math.random() > (bonus ? 0.95 : 0.98)) {
-            visualEffectSystem.emitErraticRay(centerX, centerY, bonus ? bonus.color : '#a855f7');
-        }
-
-        // Damage from active erratic rays
-        visualEffectSystem.getErraticRayPositions().forEach(pos => {
-            const range = 150 * sizeMult;
-            const enemyTargets = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
-            enemyTargets.forEach(e => {
-                const dist = Math.sqrt((e.x + e.width / 2 - pos.x)**2 + (e.y + e.height / 2 - pos.y)**2);
-                if (dist < range) {
-                    e.takeDamage(damage * (bonus ? 0.75 : 0.5)); // Constant smaller damage from rays
-                    if (Math.random() > 0.9) {
-                        visualEffectSystem.emitEnergySpark(e.x + e.width / 2, e.y + e.height / 2, bonus ? bonus.color : '#a855f7');
-                    }
+                targetY = Math.random() * 800;
+                if (rand < 0.1) { // 10% Behind
+                    targetX = Math.random() * this.x;
+                } else if (rand < 0.5) { // 40% Near
+                    targetX = this.x + Math.random() * 300;
+                    targetY = this.y + (Math.random() - 0.5) * 600;
+                } else { // 50% Front
+                    const frontEnd = 1200;
+                    const frontStart = this.x + 300;
+                    targetX = frontStart + Math.random() * (frontEnd - frontStart);
                 }
-            });
-        });
+            }
+
+            // Clamp and draw
+            targetX = Math.max(20, Math.min(1180, targetX));
+            targetY = Math.max(20, Math.min(780, targetY));
+
+            const boltColor = bonus ? bonus.color : (Math.random() > 0.3 ? '#a855f7' : '#ffffff');
+            visualEffectSystem.emitLightningBolt(targetX, -100, targetX, targetY, boltColor, (2 + level) * sizeMult);
+            
+            if (Math.random() > 0.7) {
+                triggerFeedback('flash', 0.15);
+                visualEffectSystem.emitExplosion(targetX, targetY, boltColor, 60);
+                visualEffectSystem.emitEnergySpark(targetX, targetY, '#ffffff');
+            }
+        }
     } else if (this.activeSpecial.id === 'blizzard') {
-        const level = this.activeSpecial.level;
-        
-        // Initial Impact Burst
-        if (this.activeSpecial.timer >= this.activeSpecial.duration - 0.1) {
-            visualEffectSystem.emitIceBurst(centerX, centerY, 400 * sizeMult, bonus ? bonus.color : '#60a5fa');
-            triggerFeedback('flash', 0.4);
-            triggerFeedback('shake', 10);
-        }
-
-        // Global blizzard visuals scaled by level
-        const snowflakeCount = (15 + level * 15) * (bonus ? 2 : 1);
-        for (let i = 0; i < snowflakeCount; i++) {
-            visualEffectSystem.emitSnowflake(Math.random() * 2000, -100, level * sizeMult);
-        }
-
-        // Blizzard effects on entities
-        const allEntities = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
-        allEntities.forEach((e: any) => {
-            // Progressive slowdown and freeze
-            const distance = Math.sqrt((e.x - centerX)**2 + (e.y - centerY)**2);
-            const intensityMult = 1 - Math.min(1, distance / (800 * sizeMult));
-            
-            e.freeze((bonus ? 0.4 : 0.3) * intensityMult); 
+        visualEffectSystem.emitSnowflake(Math.random() * 2000, -100, level * 2);
+        [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
+            e.freeze(0.4);
             e.takeDamage(damage);
-            
-            // Visual freeze/ice particles
-            if (Math.random() > (bonus ? 0.3 : 0.5)) {
-                visualEffectSystem.emitShotParticles(e.x + e.width / 2, e.y + e.height / 2, bonus ? bonus.color : '#93c5fd');
-            }
-            if (Math.random() > (bonus ? 0.85 : 0.92) - level * 0.01) {
-                visualEffectSystem.emitExplosion(e.x + e.width / 2, e.y + e.height / 2, '#ffffff', bonus ? 4 : 2);
-                visualEffectSystem.emitIceShatter(e.x + e.width / 2, e.y + e.height / 2, bonus ? 25 : 15);
-                if (Math.random() > 0.8) triggerFeedback('shake', 1 * sizeMult);
-            }
         });
     }
   }
 
   private emitLaserVFX(x: number, y: number, w: number, h: number, color: string) {
-    // Add particle along laser
     for (let i = 0; i < 5; i++) {
         const px = x + Math.random() * w;
         const py = y + (Math.random() - 0.5) * h;
@@ -444,23 +437,6 @@ export class Player implements Entity {
 
     ctx.scale(scale * pulse, scale * pulse);
     
-    // Draw chaotic aura if any chaos orbs are equipped
-    if (state.equippedChaosOrbs.some(id => id !== null)) {
-        ctx.save();
-        ctx.strokeStyle = '#a855f777';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        const auraRotate = time * 2;
-        for (let i = 0; i < 6; i++) {
-            const a = auraRotate + (i * Math.PI * 2) / 6;
-            const r = 25 + Math.sin(time * 5 + i) * 3;
-            ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
-        }
-        ctx.closePath();
-        ctx.stroke();
-        ctx.restore();
-    }
-    
     if (mode.playerType === PlayerType.SHIP) {
         this.drawShip(ctx, isOverloaded, time);
     } else {
@@ -469,15 +445,72 @@ export class Player implements Entity {
 
     ctx.restore();
 
-    // Draw Shield
+    // Draw Shield - ENERGY DOME REWORK
     if (this.shieldHealth > 0) {
+        const cx = this.x + this.width / 2;
+        const cy = this.y + this.height / 2;
+        const radius = this.width * 1.0 * this.shieldScale;
+        const shieldColor = '#06b6d4';
+
         ctx.save();
-        ctx.strokeStyle = '#60a5fa';
-        ctx.lineWidth = 2 + Math.sin(time * 10) * 1;
-        ctx.globalAlpha = 0.4 + Math.sin(time * 5) * 0.1;
+        ctx.globalAlpha = 0.3 + Math.sin(time * 5) * 0.1;
+        
+        // 1. Core Translucent Dome
+        const shieldGrad = ctx.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius);
+        shieldGrad.addColorStop(0, 'rgba(6, 182, 212, 0.05)');
+        shieldGrad.addColorStop(0.8, 'rgba(6, 182, 212, 0.2)');
+        shieldGrad.addColorStop(1, 'rgba(6, 182, 212, 0.5)');
+        ctx.fillStyle = shieldGrad;
         ctx.beginPath();
-        ctx.arc(this.x + this.width / 2, this.y + this.height / 2, this.width * 0.8, 0, Math.PI * 2);
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 2. Outer Glow Ring
+        ctx.strokeStyle = shieldColor;
+        ctx.lineWidth = 3;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = shieldColor;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
         ctx.stroke();
+
+        // 3. Circulating Energy Lines
+        ctx.save();
+        ctx.translate(cx, cy);
+        for (let i = 0; i < 3; i++) {
+            ctx.rotate(time * (0.5 + i * 0.2));
+            ctx.beginPath();
+            ctx.ellipse(0, 0, radius, radius * (0.3 + i * 0.1), 0, 0, Math.PI * 2);
+            ctx.globalAlpha = 0.15;
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // 4. Surface Waves (Scan lines)
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.clip();
+        
+        const waveY = (time * 100) % (radius * 4) - radius * 2;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillRect(cx - radius, cy + waveY, radius * 2, 5);
+        ctx.restore();
+
+        // 5. Impact Ripples
+        this.shieldRipples.forEach(r => {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(r.angle);
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = r.life * 5;
+            ctx.globalAlpha = r.life * 0.6;
+            ctx.beginPath();
+            ctx.arc(radius, 0, Math.max(0.1, 30 * (1 - r.life)), -0.5, 0.5);
+            ctx.stroke();
+            ctx.restore();
+        });
+
         ctx.restore();
     }
 
@@ -677,11 +710,24 @@ export class Player implements Entity {
   }
 
   // Handle taking damage with shield support
-  takeDamage(amount: number): number {
+  takeDamage(amount: number, angle?: number): number {
     if (this.shieldHealth > 0) {
         const absorb = Math.min(this.shieldHealth, amount);
         this.shieldHealth -= absorb;
-        visualEffectSystem.emitHitEffect(this.x + this.width / 2, this.y + this.height / 2, '#60a5fa');
+        
+        // Trigger ripple effect
+        this.shieldRipples.push({
+            angle: angle !== undefined ? angle : Math.random() * Math.PI * 2,
+            life: 1.0
+        });
+        
+        visualEffectSystem.emitHitEffect(this.x + this.width / 2, this.y + this.height / 2, '#06b6d4');
+        
+        if (this.shieldHealth <= 0) {
+            visualEffectSystem.emitExplosion(this.x + this.width / 2, this.y + this.height / 2, '#06b6d4', 60);
+            visualEffectSystem.emitIceShatter(this.x + this.width / 2, this.y + this.height / 2, 20);
+        }
+        
         return amount - absorb;
     }
     return amount;

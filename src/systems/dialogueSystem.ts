@@ -24,9 +24,10 @@ class DialogueSystem {
 
     private library = {
         player: {
-            shockwave: ["BANZAAAAI!", "Agora vai!", "Laser liberado!"],
-            explosion: ["GERONIMOOO!", "TOMA ESSA!", "Fogo neles!"],
-            thunder: ["It's raining... THUNDERS!", "Caiam dos céus!", "Eletrizante!"],
+            shockwave: ["TEMPESTADE CELESTIAL!", "Relâmpagos Eternos!", "Poder de Zeus!"],
+            explosion: ["SUPERNOVA PRIMORDIAL!", "Calor Absoluto!", "Estrela Cadente!"],
+            thunder: ["RUPTURA ASTRAL!", "Fenda dimensional!", "Vazio Cosmico!"],
+            blizzard: ["ERA GLACIAL!", "Zero Absoluto!", "Congelamento Total!"],
             random: ["Vorathon neles!", "Velocidade máxima!", "Estou no controle."]
         },
         summoner: ["Pra cima deles!", "Vou puxar tudo!", "Eles não escapam!", "Buraco negro ativo!"],
@@ -56,6 +57,9 @@ class DialogueSystem {
     }
 
     trigger(source: Dialogue['sourceId'], event?: string) {
+        // Handle special player abilities with extra flair
+        const isSpecialAbility = source === 'player' && event && ['shockwave', 'explosion', 'thunder', 'blizzard'].includes(event);
+
         // Redirect to companion system if it's a companion
         if (source !== 'player') {
             const compType = source === 'summoner' ? CompanionType.SUMMONER : 
@@ -72,10 +76,11 @@ class DialogueSystem {
         }
 
         const timeSinceGlobal = Math.max(...Object.values(this.lastDialogueTime));
-        // Simple heuristic: if any dialogue was triggered very recently, skip
-        if (this.dialogues.length > 0 && Math.min(...Object.values(this.lastDialogueTime)) < 0.8) return;
-        
-        if (this.lastDialogueTime[source] < this.globalCooldown) return;
+        // Special abilities bypass most cooldowns
+        if (!isSpecialAbility) {
+            if (this.dialogues.length > 0 && Math.min(...Object.values(this.lastDialogueTime)) < 0.8) return;
+            if (this.lastDialogueTime[source] < this.globalCooldown) return;
+        }
 
         let text = "";
         if (source === 'player' && event) {
@@ -95,18 +100,29 @@ class DialogueSystem {
 
         const colors = {
             player: '#ffffff',
-            summoner: '#a855f7',
-            shooter: '#f97316',
-            supporter: '#60a5fa'
+            summoner: '#a855f7', // Purple/Violet
+            shooter: '#ef4444',  // Red/Orange (Correction to #ef4444 for Red/Vibrant)
+            supporter: '#06b6d4' // Blue/Cyan
         };
+
+        // Specialized colors for player abilities
+        let bubbleColor = colors[source];
+        if (isSpecialAbility) {
+            switch (event) {
+                case 'shockwave': bubbleColor = '#eab308'; break; // Yellow
+                case 'explosion': bubbleColor = '#f97316'; break; // Orange
+                case 'thunder':   bubbleColor = '#a855f7'; break; // Purple
+                case 'blizzard':  bubbleColor = '#60a5fa'; break; // Light Blue
+            }
+        }
 
         this.dialogues.push({
             id: Math.random().toString(36).substr(2, 9),
-            text,
+            text: isSpecialAbility ? text.toUpperCase() : text,
             sourceId: source,
-            duration: 2.5,
-            timer: 2.5,
-            color: colors[source],
+            duration: isSpecialAbility ? 1.5 : 2.5,
+            timer: isSpecialAbility ? 1.5 : 2.5,
+            color: bubbleColor,
             targetX: 0,
             targetY: 0
         });
@@ -117,77 +133,94 @@ class DialogueSystem {
     draw(ctx: CanvasRenderingContext2D) {
         ctx.save();
         
-        // Prepare list of active dialogues and their desired screen positions
-        // This helps in detecting and resolving overlaps
         const activeDialogues = this.dialogues.map(d => {
-            const scale = d.timer > 2.2 ? (2.5 - d.timer) / 0.3 : (d.timer < 0.3 ? d.timer / 0.3 : 1);
-            const alpha = d.timer < 0.5 ? d.timer / 0.5 : 1;
+            const isSpecial = d.text.endsWith('!') && d.sourceId === 'player';
+            const maxT = isSpecial ? 1.5 : 2.5;
             
-            // Base offset to float up
-            const floatOffset = (1 - scale) * 20;
-            const baseY = d.targetY - 50 - floatOffset;
+            // Entry animation: scale 0 -> 1 in 0.2s
+            let scale = 1;
+            const entryTime = 0.2;
+            const timeAlive = maxT - d.timer;
+            if (timeAlive < entryTime) {
+                scale = timeAlive / entryTime;
+                // Add pop + bounce effect
+                scale = 1 + Math.sin(timeAlive * Math.PI * 5) * 0.2 * (1 - timeAlive/entryTime);
+            }
+
+            // Exit animation: fade + float up in 0.3s
+            let alpha = 1;
+            let floatY = 0;
+            const exitTime = 0.4;
+            if (d.timer < exitTime) {
+                alpha = d.timer / exitTime;
+                floatY = (1 - alpha) * -30;
+                scale *= alpha;
+            }
+            
+            const baseSizeMult = isSpecial ? 2.56 : 1.4; // 1.6 * 1.6 = 2.56 (Player special +60%) or +40% bots
+            
+            const baseY = d.targetY - (isSpecial ? 100 : 60) + floatY;
             
             return {
                 ...d,
-                scale,
+                scale: scale * baseSizeMult,
                 alpha,
                 currentY: baseY,
-                adjustedY: baseY
+                adjustedY: baseY,
+                isSpecial
             };
         });
 
         // Simple overlap resolution (vertical)
-        // Sort by Y to prevent chaotic repositioning
         activeDialogues.sort((a, b) => a.currentY - b.currentY);
         
-        const minGap = 40; // Minimum vertical distance between dialogue centers
+        const minGap = 50; 
         for (let i = 0; i < activeDialogues.length; i++) {
             for (let j = i + 1; j < activeDialogues.length; j++) {
                 const a = activeDialogues[i];
                 const b = activeDialogues[j];
-                
-                // If they are horizontally close and vertically overlapping
                 const dx = Math.abs(a.targetX - b.targetX);
                 const dy = Math.abs(a.adjustedY - b.adjustedY);
-                
-                if (dx < 100 && dy < minGap) {
-                    // Push b further up
+                if (dx < 150 && dy < minGap) {
                     b.adjustedY -= (minGap - dy);
                 }
             }
         }
 
         activeDialogues.forEach(d => {
-            ctx.save(); // CRITICAL FIX: Push state for each dialogue
+            ctx.save();
             
             ctx.globalAlpha = d.alpha;
             ctx.translate(d.targetX, d.adjustedY);
             ctx.scale(d.scale, d.scale);
 
             // Draw balloon
-            ctx.font = 'bold 14px Arial';
+            ctx.font = `black ${d.isSpecial ? 14 : 12}px "Inter", sans-serif`;
             const metrics = ctx.measureText(d.text);
-            const padding = 10;
+            const padding = 12;
             const w = metrics.width + padding * 2;
-            const h = 30;
+            const h = d.isSpecial ? 28 : 24;
 
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.9)';
-            ctx.strokeStyle = d.color;
-            ctx.lineWidth = 2;
-            
-            ctx.shadowBlur = 10;
+            // SHADOW / GLOW
+            ctx.shadowBlur = d.isSpecial ? 25 : 12;
             ctx.shadowColor = d.color;
 
+            // Box background
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+            ctx.strokeStyle = d.color;
+            ctx.lineWidth = d.isSpecial ? 3 : 2;
+            
             // Balloon body
             ctx.beginPath();
-            ctx.roundRect(-w/2, -h, w, h, 8);
+            ctx.roundRect(-w/2, -h, w, h, 6);
             ctx.fill();
             ctx.stroke();
             
+            // Tail
             ctx.beginPath();
-            ctx.moveTo(-5, 0);
-            ctx.lineTo(5, 0);
-            ctx.lineTo(0, 8);
+            ctx.moveTo(-6, 0);
+            ctx.lineTo(6, 0);
+            ctx.lineTo(0, 10);
             ctx.closePath();
             ctx.fill();
             ctx.stroke();
@@ -197,9 +230,10 @@ class DialogueSystem {
             // Text
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'center';
-            ctx.fillText(d.text, 0, -10);
+            ctx.textBaseline = 'middle';
+            ctx.fillText(d.text, 0, -h / 2);
 
-            ctx.restore(); // CRITICAL FIX: Pop state for each dialogue
+            ctx.restore();
         });
         ctx.restore();
     }

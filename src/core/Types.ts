@@ -52,7 +52,12 @@ export interface BaseItem {
 export interface ChaosOrb extends BaseItem {
   runeId: string;
   relicId: string;
-  bonuses: string[];
+  relicEffect: string;
+  runeEffect: string;
+  bonusEffects: string[];
+  bonuses: string[]; // Keep for compatibility
+  sourceRune?: { name: string; description: string };
+  sourceRelic?: { name: string; description: string };
 }
 
 export interface Rune extends BaseItem {}
@@ -89,6 +94,24 @@ export enum PowerUpClass {
   ICE = 'ICE',
   ELECTRIC = 'ELECTRIC',
   PLASMA = 'PLASMA'
+}
+
+export enum Difficulty {
+  NORMAL = 'NORMAL',
+  HARD = 'HARD',
+  NIGHTMARE = 'NIGHTMARE',
+  APOCALYPSE = 'APOCALYPSE',
+  INFERNO = 'INFERNO',
+  CHAOS = 'CHAOS'
+}
+
+export interface Area {
+  id: string;
+  name: string;
+  subtitle: string;
+  description: string;
+  threatLevel: string;
+  stages: string[];
 }
 
 export type PowerUpLevel = 1 | 2 | 3 | 4;

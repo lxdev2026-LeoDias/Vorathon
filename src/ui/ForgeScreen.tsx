@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Hammer, Zap, Shield, ArrowLeft, Diamond, Info, Sparkles, AlertTriangle, Trash2, X } from 'lucide-react';
-import { usePlayerState, equipRune, unequipRune, equipRelic, unequipRelic, equipChaosOrb, unequipChaosOrb, deductShards, destroyChaosOrb, updatePlayerState } from '../core/Store';
-import { forgeChaosOrb } from '../systems/forgeSystem';
+import { Hammer, Zap, Shield, ArrowLeft, Diamond, Info, Sparkles, AlertTriangle, Trash2, X, Coins } from 'lucide-react';
+import { usePlayerState, equipRune, unequipRune, equipRelic, unequipRelic, equipChaosOrb, unequipChaosOrb, deductShards, destroyChaosOrb, updatePlayerState, deductGold, updateChaosOrb } from '../core/Store';
+import { forgeChaosOrb, evolveOrb, rerollOrb, BONUS_LIST } from '../systems/forgeSystem';
+import { Rarity } from '../core/Types';
 import runesData from '../data/runes.json';
 import relicsData from '../data/relics.json';
 
@@ -14,20 +15,29 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
   const playerState = usePlayerState();
   const { equippedRunes, equippedRelics, equippedChaosOrbs, inventory, currency } = playerState;
   const [hoveredItem, setHoveredItem] = useState<{ item: any, type?: string, pos: { x: number, y: number }, side?: 'left' | 'right' } | null>(null);
-  const [selectedItemMenu, setSelectedItemMenu] = useState<{ item: any, pos: { x: number, y: number }, type: 'rune' | 'relic' } | null>(null);
+  const [selectedItemMenu, setSelectedItemMenu] = useState<{ item: any, pos: { x: number, y: number }, type: 'rune' | 'relic' | 'chaos' } | null>(null);
   
   // Selection for forging
   const [selectedRune, setSelectedRune] = useState<any | null>(null);
   const [selectedRelic, setSelectedRelic] = useState<any | null>(null);
+  const [selectedOrbToUpgrade, setSelectedOrbToUpgrade] = useState<any | null>(null);
   const [isForging, setIsForging] = useState(false);
+  const [isUpgrading, setIsUpgrading] = useState(false);
+  const [upgradeResult, setUpgradeResult] = useState<'success' | 'failure' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [confirmDestruction, setConfirmDestruction] = useState<string | null>(null);
+
+  // Ritual State
+  const [ritualPhase, setRitualPhase] = useState<'IDLE' | 'START' | 'ACCUMULATING' | 'CLIMAX' | 'RESULT'>('IDLE');
+  const [ritualOrb, setRitualOrb] = useState<any | null>(null);
+  const [bonusChanceLevel, setBonusChanceLevel] = useState(0); // 0: 0%, 1: +10%, 2: +15%, 3: +20%
 
   const allRunes = (runesData as any).runes;
   const allRelics = (relicsData as any).relics;
   const chaosOrbs = inventory.chaosOrbs || [];
 
   const handleMouseMove = (e: React.MouseEvent, item: any, type?: 'rune' | 'relic' | 'chaos') => {
+    if (ritualPhase !== 'IDLE') return; // Disable during ritual
     // Determine tooltip position based on item type
     let x = e.clientX + 15;
     let y = e.clientY + 15;
@@ -47,7 +57,8 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
     });
   };
 
-  const onItemClick = (e: React.MouseEvent, item: any, type: 'rune' | 'relic') => {
+  const onItemClick = (e: React.MouseEvent, item: any, type: 'rune' | 'relic' | 'chaos') => {
+      if (ritualPhase !== 'IDLE') return; // Disable during ritual
       e.stopPropagation();
       setHoveredItem(null); // Close tooltip when clicking
       setSelectedItemMenu({
@@ -58,33 +69,150 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
   };
 
   const handleEquipFromMenu = () => {
-      if (!selectedItemMenu) return;
+      if (!selectedItemMenu || ritualPhase !== 'IDLE') return;
       const { item, type } = selectedItemMenu;
       
       if (type === 'rune') {
           const emptySlot = equippedRunes.findIndex(id => id === null);
           if (emptySlot !== -1) equipRune(item.id, emptySlot);
-      } else {
+      } else if (type === 'relic') {
           const emptySlot = equippedRelics.findIndex(id => id === null);
           if (emptySlot !== -1) equipRelic(item.id, emptySlot);
+      } else if (type === 'chaos') {
+          const emptySlot = equippedChaosOrbs.findIndex(id => id === null);
+          if (emptySlot !== -1) equipChaosOrb(item.id, emptySlot);
       }
       setSelectedItemMenu(null);
   };
 
   const handleForgeFromMenu = () => {
-    if (!selectedItemMenu) return;
+    if (!selectedItemMenu || ritualPhase !== 'IDLE') return;
     const { item, type } = selectedItemMenu;
     
-    if (type === 'rune') setSelectedRune(item);
-    else setSelectedRelic(item);
+    if (type === 'rune') {
+        setSelectedRune(item);
+        setSelectedOrbToUpgrade(null);
+    } else if (type === 'relic') {
+        setSelectedRelic(item);
+        setSelectedOrbToUpgrade(null);
+    } else if (type === 'chaos') {
+        setSelectedOrbToUpgrade(item);
+        setSelectedRune(null);
+        setSelectedRelic(null);
+        setBonusChanceLevel(0); // Reset bonus when changing orb
+    }
     
     setSelectedItemMenu(null);
 };
 
+  const getBonusChanceInfo = (level: number) => {
+    switch (level) {
+        case 1: return { chance: 0.10, cost: 50 };
+        case 2: return { chance: 0.15, cost: 75 };
+        case 3: return { chance: 0.20, cost: 100 };
+        default: return { chance: 0, cost: 0 };
+    }
+  };
+
+  const handleEvolveOrb = () => {
+      if (!selectedOrbToUpgrade || ritualPhase !== 'IDLE') return;
+      
+      const orb = selectedOrbToUpgrade;
+      let costGold = 0;
+      let costShards = 0;
+
+      if (orb.rarity === Rarity.COMMON) {
+          costGold = 10000;
+          costShards = 10;
+      } else if (orb.rarity === Rarity.EPIC) {
+          costGold = 15000;
+          costShards = 20;
+      } else {
+          return;
+      }
+
+      const bonusInfo = getBonusChanceInfo(bonusChanceLevel);
+      const totalCostShards = costShards + bonusInfo.cost;
+
+      if (currency.gold < costGold || currency.primordialShards < totalCostShards) {
+          setErrorMessage("Recursos insuficientes para Evolução.");
+          setTimeout(() => setErrorMessage(null), 3000);
+          return;
+      }
+
+      // START RITUAL
+      setRitualOrb(orb);
+      setRitualPhase('START');
+      setUpgradeResult(null);
+
+      // 1. START -> ACCUMULATING (0.5s)
+      setTimeout(() => {
+          setRitualPhase('ACCUMULATING');
+      }, 500);
+
+      // 2. ACCUMULATING -> CLIMAX (3s)
+      setTimeout(() => {
+          setRitualPhase('CLIMAX');
+          
+          // Execute logic exactly during climax
+          deductGold(costGold);
+          deductShards(totalCostShards);
+
+          const result = evolveOrb(orb, bonusInfo.chance);
+          if (result.success && result.updatedOrb) {
+              updateChaosOrb(result.updatedOrb);
+              setSelectedOrbToUpgrade(result.updatedOrb);
+              setUpgradeResult('success');
+              setBonusChanceLevel(0); // Reset after success
+          } else {
+              setUpgradeResult('failure');
+          }
+      }, 3500);
+
+      // 3. CLIMAX -> RESULT (4s total)
+      setTimeout(() => {
+          setRitualPhase('RESULT');
+      }, 4000);
+
+      // 4. RESET (7s total)
+      setTimeout(() => {
+          setRitualPhase('IDLE');
+          setUpgradeResult(null);
+      }, 7000);
+  };
+
+  const handleRerollOrb = () => {
+      if (!selectedOrbToUpgrade || selectedOrbToUpgrade.rarity !== Rarity.MYTHIC) return;
+
+      const costGold = 5000;
+      const costShards = 5;
+
+      if (currency.gold < costGold || currency.primordialShards < costShards) {
+          setErrorMessage("Recursos insuficientes para Reroll.");
+          setTimeout(() => setErrorMessage(null), 3000);
+          return;
+      }
+
+      setIsUpgrading(true);
+      setUpgradeResult(null);
+
+      setTimeout(() => {
+          deductGold(costGold);
+          deductShards(costShards);
+
+          const updatedOrb = rerollOrb(selectedOrbToUpgrade);
+          updateChaosOrb(updatedOrb);
+          setSelectedOrbToUpgrade(updatedOrb);
+          setUpgradeResult('success');
+          setIsUpgrading(false);
+          setTimeout(() => setUpgradeResult(null), 3000);
+      }, 1000);
+  };
+
   const handleStartForge = () => {
       if (!selectedRune || !selectedRelic) return;
       
-      if (chaosOrbs.length >= 4) {
+      if (chaosOrbs.length >= 6) {
           setErrorMessage("Limite de Orbes atingido. Destrua um Orbe para criar outro.");
           setTimeout(() => setErrorMessage(null), 3000);
           return;
@@ -97,6 +225,7 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
       }
 
       setIsForging(true);
+      setSelectedOrbToUpgrade(null); // Clear upgrade slot when starting fresh forge
       setTimeout(() => {
           const result = forgeChaosOrb(selectedRune, selectedRelic);
           if (typeof result === 'string') {
@@ -122,17 +251,154 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
 
   const getRarityColor = (rarity: string) => {
       switch (rarity) {
-          case 'MYTHIC': return 'bg-red-500 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]';
-          case 'EPIC': return 'bg-purple-500 text-white shadow-[0_0_15px_rgba(168,85,247,0.5)]';
-          case 'RARE': return 'bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]';
-          case 'LEGENDARY': return 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.5)]';
-          default: return 'bg-slate-600 text-slate-200';
+          case 'MYTHIC': return 'bg-amber-500 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.5)] font-black uppercase';
+          case 'EPIC': return 'bg-purple-600 text-white shadow-[0_0_15px_rgba(147,51,234,0.5)] font-bold uppercase';
+          case 'RARE': return 'bg-blue-500 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)] font-bold uppercase';
+          case 'LEGENDARY': return 'bg-orange-500 text-white shadow-[0_0_15px_rgba(249,115,22,0.5)] font-bold uppercase';
+          default: return 'bg-slate-200 text-slate-800 font-bold uppercase';
       }
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-white p-6 gap-6 font-sans select-none overflow-hidden" onMouseLeave={() => setHoveredItem(null)}>
-      {/* Tooltip */}
+    <div className={`flex flex-col h-full bg-slate-950 text-white p-6 gap-6 font-sans select-none overflow-hidden relative ${ritualPhase === 'ACCUMULATING' ? 'animate-pulse' : ''}`} onMouseLeave={() => setHoveredItem(null)}>
+      {/* Ritual Overlay - Darkens screen and focuses on forge */}
+      <AnimatePresence>
+          {ritualPhase !== 'IDLE' && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-md flex items-center justify-center overflow-hidden"
+              >
+                  {/* Energy Vortex Particles */}
+                  {ritualPhase === 'ACCUMULATING' && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                          {[...Array(12)].map((_, i) => (
+                              <motion.div
+                                  key={i}
+                                  initial={{ rotate: i * 30, scale: 0, opacity: 0 }}
+                                  animate={{ 
+                                      rotate: i * 30 + 360, 
+                                      scale: [0.5, 2, 0],
+                                      opacity: [0, 0.8, 0],
+                                      x: [0, (Math.random()-0.5)*800],
+                                      y: [0, (Math.random()-0.5)*800]
+                                  }}
+                                  transition={{ 
+                                      duration: 2, 
+                                      repeat: Infinity, 
+                                      delay: i * 0.1,
+                                      ease: "easeInOut"
+                                  }}
+                                  className="absolute w-2 h-24 bg-gradient-to-t from-transparent via-purple-500 to-transparent rounded-full blur-xl"
+                              />
+                          ))}
+                      </div>
+                  )}
+
+                  {/* Climax Flash */}
+                  {ritualPhase === 'CLIMAX' && (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: [0, 1, 0] }}
+                        transition={{ duration: 0.5 }}
+                        className="fixed inset-0 bg-white z-[2500]"
+                      />
+                  )}
+
+                  {/* Ritual Content */}
+                  <div className="flex flex-col items-center gap-12 relative z-[2100]">
+                      <motion.div 
+                        animate={
+                            ritualPhase === 'START' ? { y: [-100, -150], scale: 1.2 } :
+                            ritualPhase === 'ACCUMULATING' ? { 
+                                y: -150, 
+                                scale: [1.2, 1.3, 1.2],
+                                rotate: [0, 5, -5, 0],
+                                filter: ["brightness(1) contrast(1)", "brightness(2) contrast(1.5)", "brightness(1) contrast(1)"]
+                            } :
+                            ritualPhase === 'CLIMAX' ? { scale: 3, opacity: 0 } :
+                            ritualPhase === 'RESULT' ? { scale: 1.5, opacity: 1, y: -100 } :
+                            {}
+                        }
+                        transition={
+                            ritualPhase === 'ACCUMULATING' ? { duration: 0.2, repeat: Infinity } :
+                            { duration: 0.5 }
+                        }
+                        className="relative"
+                      >
+                         <span className={`text-[12rem] drop-shadow-[0_0_50px_rgba(168,85,247,0.8)] ${ritualPhase === 'RESULT' && upgradeResult === 'failure' ? 'grayscale opacity-50' : ''}`}>
+                             {ritualOrb?.icon || '🔮'}
+                         </span>
+                         
+                         {/* Energy Pulsing Glow */}
+                         {ritualPhase === 'ACCUMULATING' && (
+                             <motion.div 
+                                animate={{ scale: [1, 2], opacity: [0.5, 0] }}
+                                transition={{ duration: 1, repeat: Infinity }}
+                                className="absolute inset-0 bg-purple-500 rounded-full blur-[100px] -z-10"
+                             />
+                         )}
+
+                         {/* Result Particles */}
+                         {ritualPhase === 'RESULT' && upgradeResult === 'success' && (
+                             <div className="absolute inset-0 flex items-center justify-center">
+                                 {[...Array(20)].map((_, i) => (
+                                     <motion.div
+                                        key={i}
+                                        initial={{ scale: 0, x: 0, y: 0 }}
+                                        animate={{ 
+                                            scale: [0, 1, 0], 
+                                            x: (Math.random()-0.5)*400, 
+                                            y: (Math.random()-0.5)*400 
+                                        }}
+                                        transition={{ duration: 2, repeat: Infinity, delay: i * 0.05 }}
+                                        className={`absolute w-3 h-3 rounded-full blur-sm ${ritualOrb?.rarity === Rarity.EPIC ? 'bg-purple-400' : 'bg-amber-400'}`}
+                                     />
+                                 ))}
+                             </div>
+                         )}
+                      </motion.div>
+
+                      {/* Result Text */}
+                      <AnimatePresence mode="wait">
+                          {ritualPhase === 'RESULT' && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: 50, scale: 0.5 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                className="flex flex-col items-center gap-4"
+                              >
+                                  {upgradeResult === 'success' ? (
+                                      <>
+                                          <h2 className={`text-6xl font-black italic tracking-tighter uppercase drop-shadow-[0_0_20px_rgba(168,85,247,0.5)] ${ritualOrb?.rarity === Rarity.EPIC ? 'text-purple-400' : 'text-amber-400'}`}>
+                                              Parabéns, sua Orbe evoluiu!
+                                          </h2>
+                                          <div className="flex items-center gap-4 bg-white/10 px-8 py-4 rounded-3xl border border-white/20 backdrop-blur-xl">
+                                              <span className="text-4xl">{ritualOrb?.icon}</span>
+                                              <div className="flex flex-col">
+                                                  <span className="text-xl font-black italic uppercase">{ritualOrb?.name}</span>
+                                                  <span className={`text-xs font-black uppercase tracking-[0.3em] ${getRarityColor(ritualOrb?.rarity)} px-2 py-0.5 rounded w-fit`}>
+                                                    {ritualOrb?.rarity}
+                                                  </span>
+                                              </div>
+                                          </div>
+                                      </>
+                                  ) : (
+                                      <div className="flex flex-col items-center gap-2">
+                                          <h2 className="text-8xl font-black italic tracking-tighter uppercase text-slate-600 animate-bounce">
+                                              Fracasso.
+                                          </h2>
+                                          <p className="text-slate-500 font-bold italic">A essência colapsou...</p>
+                                      </div>
+                                  )}
+                              </motion.div>
+                          )}
+                      </AnimatePresence>
+                  </div>
+              </motion.div>
+          )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {hoveredItem && (
             <motion.div 
@@ -166,7 +432,7 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
                         </div>
 
                         <div className="flex flex-col gap-3">
-                            <p className="text-slate-300 text-[13px] leading-relaxed font-medium italic opacity-80 border-l-2 border-purple-500/30 pl-4 py-1">
+                            <p className="text-slate-300 text-[13px] leading-relaxed font-medium italic opacity-80 border-l-2 border-purple-500/30 pl-4 py-1 whitespace-pre-line">
                                 {hoveredItem.item.description || "Manifestação energética pura."}
                             </p>
 
@@ -280,14 +546,26 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
                         onClick={handleEquipFromMenu}
                         className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-emerald-500/10 hover:text-emerald-400 rounded-lg transition-all font-black italic text-[11px] uppercase tracking-wider"
                       >
-                          <Zap size={14} className="text-emerald-500" /> Equipar
+                          <Zap size={14} className="text-emerald-500" /> {selectedItemMenu.type === 'chaos' ? 'USAR' : 'Equipar'}
                       </button>
                       <button 
                         onClick={handleForgeFromMenu}
                         className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-blue-500/10 hover:text-blue-400 rounded-lg transition-all font-black italic text-[11px] uppercase tracking-wider"
                       >
-                          <Hammer size={14} className="text-blue-500" /> Forjar
+                          <Hammer size={14} className="text-blue-500" /> {selectedItemMenu.type === 'chaos' ? 'FORJA' : 'FORJAR'}
                       </button>
+
+                      {selectedItemMenu.type === 'chaos' && (
+                          <button 
+                            onClick={() => {
+                                setConfirmDestruction(selectedItemMenu.item.id);
+                                setSelectedItemMenu(null);
+                            }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all font-black italic text-[11px] uppercase tracking-wider"
+                          >
+                              <Trash2 size={14} className="text-red-500" /> QUEBRAR
+                          </button>
+                      )}
                       <div className="h-px bg-slate-800 my-1 mx-2" />
                       <button 
                         onClick={() => setSelectedItemMenu(null)}
@@ -337,14 +615,19 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
           <Hammer className="text-blue-500" size={32} />
           <h1 className="text-3xl font-black tracking-tighter italic">FORJA CELESTIAL</h1>
         </div>
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg group hover:border-amber-500/50 transition-all">
+                <Coins className="text-amber-400 group-hover:animate-pulse" size={18} />
+                <span className="font-mono font-bold">{currency.gold.toLocaleString()}</span>
+            </div>
             <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg group hover:border-blue-500/50 transition-all">
                 <Diamond className="text-blue-400 group-hover:animate-pulse" size={18} />
                 <span className="font-mono font-bold">{currency.primordialShards}</span>
             </div>
             <button 
+                disabled={ritualPhase !== 'IDLE'}
                 onClick={onBack}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors font-bold text-sm tracking-widest"
+                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed rounded-lg text-slate-300 transition-colors font-bold text-sm tracking-widest"
             >
                 <ArrowLeft size={18} /> VOLTAR
             </button>
@@ -386,52 +669,178 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
         <section className="col-span-6 flex flex-col items-center py-6 relative bg-[radial-gradient(circle_at_center,_var(--tw-gradient-from)_0%,_var(--tw-gradient-to)_100%)] from-slate-900 to-slate-950 rounded-3xl border border-slate-800 shadow-2xl overflow-y-auto custom-scrollbar">
           <div className="w-full flex flex-col items-center gap-8 px-12">
               <div className="flex items-center justify-center gap-16 w-full mt-4">
-                  <div className="flex flex-col items-center gap-3">
-                      <div className={`w-32 h-32 rounded-2xl border-2 flex items-center justify-center transition-all duration-500 relative ${selectedRune ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_40px_rgba(59,130,246,0.3)]' : 'border-slate-800 border-dashed bg-black/20'}`}>
-                          {selectedRune ? (
-                              <>
-                                <span className="text-6xl">{selectedRune.icon}</span>
-                                <button onClick={() => setSelectedRune(null)} className="absolute -top-3 -right-3 p-2 bg-slate-800 rounded-full border border-slate-700 hover:text-red-400 shadow-xl"><X size={16}/></button>
-                              </>
-                          ) : <Zap className="text-slate-800" size={56} />}
-                      </div>
-                      <span className="text-[12px] font-black text-blue-500 uppercase tracking-[0.2em] italic">Essência Rúnica</span>
-                  </div>
+                  {!selectedOrbToUpgrade ? (
+                      <>
+                        <div className="flex flex-col items-center gap-3">
+                            <div className={`w-32 h-32 rounded-2xl border-2 flex items-center justify-center transition-all duration-500 relative ${selectedRune ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_40px_rgba(59,130,246,0.3)]' : 'border-slate-800 border-dashed bg-black/20'}`}>
+                                {selectedRune ? (
+                                    <>
+                                        <span className="text-6xl">{selectedRune.icon}</span>
+                                        <button onClick={() => setSelectedRune(null)} className="absolute -top-3 -right-3 p-2 bg-slate-800 rounded-full border border-slate-700 hover:text-red-400 shadow-xl"><X size={16}/></button>
+                                    </>
+                                ) : <Zap className="text-slate-800" size={56} />}
+                            </div>
+                            <span className="text-[12px] font-black text-blue-500 uppercase tracking-[0.2em] italic">Essência Rúnica</span>
+                        </div>
 
-                  <div className="relative">
-                      <div className="w-24 h-24 rounded-full border-2 border-slate-700 flex items-center justify-center bg-slate-950 shadow-inner">
-                          <Sparkles className={`text-amber-500 ${isForging ? 'animate-spin' : 'animate-pulse'}`} size={40} />
-                      </div>
-                  </div>
+                        <div className="relative">
+                            <div className="w-24 h-24 rounded-full border-2 border-slate-700 flex items-center justify-center bg-slate-950 shadow-inner">
+                                <Sparkles className={`text-amber-500 ${isForging ? 'animate-spin' : 'animate-pulse'}`} size={40} />
+                            </div>
+                        </div>
 
-                  <div className="flex flex-col items-center gap-3">
-                      <div className={`w-32 h-32 rounded-2xl border-2 flex items-center justify-center transition-all duration-500 relative ${selectedRelic ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_40px_rgba(16,185,129,0.3)]' : 'border-slate-800 border-dashed bg-black/20'}`}>
-                          {selectedRelic ? (
-                              <>
-                                <span className="text-6xl">{selectedRelic.icon}</span>
-                                <button onClick={() => setSelectedRelic(null)} className="absolute -top-3 -right-3 p-2 bg-slate-800 rounded-full border border-slate-700 hover:text-red-400 shadow-xl"><X size={16}/></button>
-                              </>
-                          ) : <Shield className="text-slate-800" size={56} />}
+                        <div className="flex flex-col items-center gap-3">
+                            <div className={`w-32 h-32 rounded-2xl border-2 flex items-center justify-center transition-all duration-500 relative ${selectedRelic ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_40px_rgba(16,185,129,0.3)]' : 'border-slate-800 border-dashed bg-black/20'}`}>
+                                {selectedRelic ? (
+                                    <>
+                                        <span className="text-6xl">{selectedRelic.icon}</span>
+                                        <button onClick={() => setSelectedRelic(null)} className="absolute -top-3 -right-3 p-2 bg-slate-800 rounded-full border border-slate-700 hover:text-red-400 shadow-xl"><X size={16}/></button>
+                                    </>
+                                ) : <Shield className="text-slate-800" size={56} />}
+                            </div>
+                            <span className="text-[12px] font-black text-emerald-500 uppercase tracking-[0.2em] italic">Vínculo Relíquia</span>
+                        </div>
+                      </>
+                  ) : (
+                      <div className="flex flex-col items-center gap-4 py-8">
+                          <h3 className="text-[14px] font-black text-purple-400 uppercase tracking-[0.4em] italic mb-2">Melhoria de Orbe</h3>
+                          <div className={`w-40 h-40 rounded-[2.5rem] border-2 flex items-center justify-center transition-all duration-500 relative ${selectedOrbToUpgrade ? 'border-purple-500 bg-purple-500/10 shadow-[0_0_60px_rgba(168,85,247,0.4)]' : 'border-slate-800 border-dashed bg-black/20'}`}>
+                              <span className="text-7xl drop-shadow-[0_0_20px_rgba(168,85,247,0.6)] animate-pulse">{selectedOrbToUpgrade.icon}</span>
+                              <button onClick={() => { setSelectedOrbToUpgrade(null); setUpgradeResult(null); }} className="absolute -top-3 -right-3 p-2 bg-slate-800 rounded-full border border-slate-700 hover:text-red-400 shadow-xl"><X size={20}/></button>
+                              
+                              {upgradeResult === 'success' && (
+                                  <motion.div 
+                                      initial={{ scale: 0, opacity: 0 }}
+                                      animate={{ scale: 3, opacity: 0 }}
+                                      transition={{ duration: 1 }}
+                                      className="absolute inset-0 rounded-full border-4 border-amber-400"
+                                  />
+                              )}
+                          </div>
+                          <div className="flex flex-col items-center">
+                              <span className="text-lg font-black italic text-white uppercase">{selectedOrbToUpgrade.name}</span>
+                              <span className={`text-[11px] font-black uppercase tracking-widest ${getRarityColor(selectedOrbToUpgrade.rarity)} w-fit px-3 py-1 mt-1 rounded`}>
+                                  {selectedOrbToUpgrade.rarity}
+                              </span>
+                          </div>
                       </div>
-                      <span className="text-[12px] font-black text-emerald-500 uppercase tracking-[0.2em] italic">Vínculo Relíquia</span>
-                  </div>
+                  )}
               </div>
 
               <div className="w-full flex flex-col items-center gap-6">
-                  <button 
-                    disabled={!selectedRune || !selectedRelic || isForging}
-                    onClick={handleStartForge}
-                    className={`relative group px-24 py-5 overflow-hidden rounded-full transition-all duration-500 border-2 ${!selectedRune || !selectedRelic ? 'opacity-30 grayscale cursor-not-allowed border-slate-800' : 'border-amber-500 hover:border-amber-400 active:scale-95 shadow-[0_0_40px_rgba(245,158,11,0.2)]'}`}
-                  >
-                    <div className="absolute inset-0 bg-amber-500/10 group-hover:bg-amber-500/20 transition-all" />
-                    <span className="relative z-10 font-black uppercase italic tracking-[0.3em] text-base flex items-center gap-4">
-                        {isForging ? (
-                            <>MANIFESTANDO ORBE...</>
-                        ) : (
-                            <>FORJAR ORBE DO CAOS (10 <Diamond size={18} className="inline"/>)</>
-                        )}
-                    </span>
-                  </button>
+                  {!selectedOrbToUpgrade ? (
+                      <button 
+                        disabled={!selectedRune || !selectedRelic || isForging}
+                        onClick={handleStartForge}
+                        className={`relative group px-24 py-5 overflow-hidden rounded-full transition-all duration-500 border-2 ${!selectedRune || !selectedRelic ? 'opacity-30 grayscale cursor-not-allowed border-slate-800' : 'border-amber-500 hover:border-amber-400 active:scale-95 shadow-[0_0_40px_rgba(245,158,11,0.2)]'}`}
+                      >
+                        <div className="absolute inset-0 bg-amber-500/10 group-hover:bg-amber-500/20 transition-all" />
+                        <span className="relative z-10 font-black uppercase italic tracking-[0.3em] text-base flex items-center gap-4">
+                            {isForging ? (
+                                <>MANIFESTANDO ORBE...</>
+                            ) : (
+                                <>FORJAR ORBE DO CAOS (10 <Diamond size={18} className="inline"/>)</>
+                            )}
+                        </span>
+                      </button>
+                  ) : (
+                      <div className="flex flex-col items-center gap-6 w-full max-w-md">
+                          {selectedOrbToUpgrade.rarity !== Rarity.MYTHIC ? (
+                              <div className="w-full flex flex-col gap-4 bg-slate-900/80 p-6 rounded-2xl border border-purple-500/30">
+                                  <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-wider text-slate-400 italic">
+                                      <span>Próxima Raridade:</span>
+                                      <span className={selectedOrbToUpgrade.rarity === Rarity.COMMON ? 'text-purple-400' : 'text-amber-400'}>
+                                          {selectedOrbToUpgrade.rarity === Rarity.COMMON ? 'ÉPICA' : 'MÍTICA'}
+                                      </span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-[11px] font-black uppercase tracking-wider text-slate-400 italic">
+                                      <span>Chance de Sucesso:</span>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-emerald-400">
+                                              {((selectedOrbToUpgrade.rarity === Rarity.COMMON ? 20 : 10) + (getBonusChanceInfo(bonusChanceLevel).chance * 100))}%
+                                          </span>
+                                          {bonusChanceLevel > 0 && (
+                                              <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                                                  +{getBonusChanceInfo(bonusChanceLevel).chance * 100}%
+                                              </span>
+                                          )}
+                                      </div>
+                                  </div>
+                                  
+                                  <div className="flex gap-4 justify-center">
+                                      <div className="flex items-center gap-2 text-[12px] font-black italic text-amber-400">
+                                          <Coins size={16} /> {selectedOrbToUpgrade.rarity === Rarity.COMMON ? '10.000' : '15.000'}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[12px] font-black italic text-blue-400">
+                                          <Diamond size={16} /> {(selectedOrbToUpgrade.rarity === Rarity.COMMON ? 10 : 20) + getBonusChanceInfo(bonusChanceLevel).cost}
+                                      </div>
+                                  </div>
+
+                                  <div className="flex gap-3">
+                                      <button 
+                                          disabled={isUpgrading}
+                                          onClick={handleEvolveOrb}
+                                          className="flex-1 py-4 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 rounded-xl font-black italic text-base uppercase tracking-[0.2em] transition-all shadow-lg active:scale-95"
+                                      >
+                                          {isUpgrading ? 'EVOLUINDO...' : 'EVOLUIR ORBE'}
+                                      </button>
+
+                                      <div className="relative group/boost">
+                                          <button
+                                              disabled={isUpgrading || bonusChanceLevel >= 3}
+                                              onClick={(e) => { e.stopPropagation(); setBonusChanceLevel(prev => Math.min(3, prev + 1)); }}
+                                              className={`w-20 h-full rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all active:scale-95 ${
+                                                  bonusChanceLevel >= 3 
+                                                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-400' 
+                                                  : 'border-blue-500/30 bg-blue-500/10 hover:border-blue-500/60 text-blue-400'
+                                              }`}
+                                              title="Aumentar Chance"
+                                          >
+                                              <Sparkles size={16} className={bonusChanceLevel > 0 ? 'animate-pulse' : ''} />
+                                              <span className="text-[10px] font-black italic leading-none">
+                                                  {bonusChanceLevel < 3 ? `+${(getBonusChanceInfo(bonusChanceLevel + 1).chance * 100)}%` : 'MAX'}
+                                              </span>
+                                              <span className="text-[8px] font-bold opacity-70">
+                                                  {bonusChanceLevel < 3 ? `${getBonusChanceInfo(bonusChanceLevel + 1).cost} 🔷` : 'BOOST'}
+                                              </span>
+                                          </button>
+
+                                          {bonusChanceLevel > 0 && !isUpgrading && (
+                                              <button 
+                                                onClick={(e) => { e.stopPropagation(); setBonusChanceLevel(0); }}
+                                                className="absolute -top-2 -right-2 p-1 bg-slate-800 rounded-full border border-slate-700 text-slate-400 hover:text-red-400 shadow-lg z-10"
+                                                title="Resetar Bônus"
+                                              >
+                                                  <X size={10} />
+                                              </button>
+                                          )}
+                                      </div>
+                                  </div>
+                              </div>
+                          ) : (
+                              <div className="w-full flex flex-col gap-4 bg-slate-900/80 p-6 rounded-2xl border border-amber-500/30">
+                                  <span className="text-[12px] font-black uppercase text-amber-400 italic text-center tracking-widest">Nível Máximo de Raridade</span>
+                                  
+                                  <div className="flex gap-4 justify-center">
+                                      <div className="flex items-center gap-2 text-[12px] font-black italic text-amber-400">
+                                          <Coins size={16} /> 5.000
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[12px] font-black italic text-blue-400">
+                                          <Diamond size={16} /> 5
+                                      </div>
+                                  </div>
+
+                                  <button 
+                                      disabled={isUpgrading}
+                                      onClick={handleRerollOrb}
+                                      className="w-full py-4 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 rounded-xl font-black italic text-base uppercase tracking-[0.2em] transition-all shadow-lg active:scale-95"
+                                  >
+                                      {isUpgrading ? 'REROLL EM PROGRESSO...' : 'REROLL DE ATRIBUTOS'}
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                  )}
                   
                   {errorMessage && (
                       <motion.div 
@@ -448,7 +857,7 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
 
               <div className="w-full grid grid-cols-2 gap-12">
                   <div className="flex flex-col items-center gap-6">
-                      <h3 className="text-[12px] font-black text-purple-400 uppercase tracking-[0.4em] italic mb-2">Inventário de Orbes ({chaosOrbs.length}/4)</h3>
+                      <h3 className="text-[12px] font-black text-purple-400 uppercase tracking-[0.4em] italic mb-2">Inventário de Orbes ({chaosOrbs.length}/6)</h3>
                       <div className="grid grid-cols-2 gap-5">
                         {chaosOrbs.map((item: any) => {
                             const isEquipped = equippedChaosOrbs.includes(item.id);
@@ -461,31 +870,35 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
                                 >
                                     <span className="text-5xl drop-shadow-[0_0_15px_rgba(168,85,247,0.5)]">{item.icon}</span>
                                     
-                                    <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-5 transition-opacity rounded-[2rem] z-10">
+                                    <div className="absolute inset-0 bg-black/80 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-3 transition-opacity rounded-[2rem] z-10 p-2">
                                         {!isEquipped && (
                                             <button 
-                                                onClick={() => {
-                                                    const emptySlot = equippedChaosOrbs.findIndex((s: any) => s === null);
-                                                    if (emptySlot !== -1) equipChaosOrb(item.id, emptySlot);
-                                                }}
-                                                className="p-3 bg-blue-600 rounded-xl hover:bg-blue-500 shadow-2xl transition-transform active:scale-90"
-                                                title="Equipar"
+                                                onClick={(e) => { e.stopPropagation(); const emptySlot = equippedChaosOrbs.findIndex((s: any) => s === null); if (emptySlot !== -1) equipChaosOrb(item.id, emptySlot); }}
+                                                className="p-2.5 bg-blue-600 rounded-xl hover:bg-blue-500 shadow-2xl transition-transform active:scale-90 flex-1 flex justify-center"
+                                                title="Usar"
                                             >
-                                                <Zap size={22} />
+                                                <Zap size={20} />
                                             </button>
                                         )}
                                         <button 
-                                            onClick={() => setConfirmDestruction(item.id)}
-                                            className="p-3 bg-red-600 rounded-xl hover:bg-red-500 shadow-2xl transition-transform active:scale-90"
-                                            title="Destruir"
+                                            onClick={(e) => { e.stopPropagation(); setSelectedOrbToUpgrade(item); setSelectedRune(null); setSelectedRelic(null); }}
+                                            className="p-2.5 bg-amber-600 rounded-xl hover:bg-amber-500 shadow-2xl transition-transform active:scale-90 flex-1 flex justify-center"
+                                            title="Forja"
                                         >
-                                            <Trash2 size={22} />
+                                            <Hammer size={20} />
+                                        </button>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setConfirmDestruction(item.id); }}
+                                            className="p-2.5 bg-red-600 rounded-xl hover:bg-red-500 shadow-2xl transition-transform active:scale-90 flex-1 flex justify-center"
+                                            title="Quebrar"
+                                        >
+                                            <Trash2 size={20} />
                                         </button>
                                     </div>
                                 </motion.div>
                             );
                         })}
-                        {Array.from({ length: 4 - chaosOrbs.length }).map((_, i) => (
+                        {Array.from({ length: 6 - chaosOrbs.length }).map((_, i) => (
                             <div key={`empty-inv-${i}`} className="w-28 h-28 bg-black/20 border-2 border-slate-800 border-dashed rounded-[2rem] flex items-center justify-center opacity-30">
                                 <Sparkles size={24} className="text-slate-800" />
                             </div>

@@ -734,16 +734,17 @@ export class VisualEffectSystem {
         const tipPulse = 1 + Math.sin(time * 30) * 0.2;
         const tipSize = Math.max(0.1, currentHeight * 2 * tipPulse);
         
-        if (Number.isFinite(tipSize) && Number.isFinite(x) && Number.isFinite(width) && Number.isFinite(beamY)) {
-            const tipGrad = ctx.createRadialGradient(x + width, beamY, 0, x + width, beamY, tipSize);
-            tipGrad.addColorStop(0, beamColor);
-            tipGrad.addColorStop(1, 'transparent');
-            ctx.fillStyle = tipGrad;
-            ctx.globalAlpha = 0.4;
-            ctx.beginPath();
-            ctx.arc(x + width, beamY, tipSize, 0, Math.PI * 2);
-            ctx.fill();
-        }
+            if (Number.isFinite(tipSize) && Number.isFinite(x) && Number.isFinite(width) && Number.isFinite(beamY)) {
+                const tipRadius = Math.max(0.1, tipSize);
+                const tipGrad = ctx.createRadialGradient(x + width, beamY, 0, x + width, beamY, tipRadius);
+                tipGrad.addColorStop(0, beamColor);
+                tipGrad.addColorStop(1, 'transparent');
+                ctx.fillStyle = tipGrad;
+                ctx.globalAlpha = 0.4;
+                ctx.beginPath();
+                ctx.arc(x + width, beamY, tipRadius, 0, Math.PI * 2);
+                ctx.fill();
+            }
         ctx.restore();
 
         ctx.restore();
@@ -770,7 +771,7 @@ export class VisualEffectSystem {
         const tipRadius = Math.max(0.1, height / 2 + Math.sin(time * 30 + seed) * (5 + level * 2));
         const tipX = x + width;
         if (Number.isFinite(tipRadius) && Number.isFinite(tipX) && Number.isFinite(y)) {
-            ctx.arc(tipX, y, tipRadius, -Math.PI / 2, Math.PI / 2);
+            ctx.arc(tipX, y, tipRadius, -Math.PI / 2, Math.PI * 0.5);
         }
 
         // Bottom edge with vibration
@@ -886,14 +887,14 @@ export class VisualEffectSystem {
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
         this.particles.forEach(p => {
-            const alpha = p.life / p.maxLife;
+            const alpha = Math.max(0, Math.min(1, p.life / p.maxLife));
             ctx.globalAlpha = alpha;
             ctx.fillStyle = p.color;
 
             if (p.type === 'glow') {
-                const growth = (1 - alpha) * (p.size > 1 ? p.size : 600);
+                const growth = Math.max(0.1, (1 - alpha) * (p.size > 1 ? p.size : 600));
                 ctx.strokeStyle = p.color;
-                ctx.lineWidth = 4 * alpha;
+                ctx.lineWidth = Math.max(0, 4 * alpha);
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, growth, 0, Math.PI * 2);
                 ctx.stroke();
@@ -901,40 +902,40 @@ export class VisualEffectSystem {
                 // Second thinner ring for depth
                 if (p.size > 1) {
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, growth * 0.8, 0, Math.PI * 2);
+                    ctx.arc(p.x, p.y, Math.max(0.1, growth * 0.8), 0, Math.PI * 2);
                     ctx.stroke();
                 }
             } else if (p.type === 'snow') {
                 ctx.fillStyle = p.color;
                 ctx.beginPath();
                 // Random snowflake-ish shape (simple cross)
-                const s = p.size;
+                const s = Math.max(0.1, p.size);
                 ctx.rect(p.x - s, p.y - s/4, s*2, s/2);
                 ctx.rect(p.x - s/4, p.y - s, s/2, s*2);
                 ctx.fill();
             } else if (p.type === 'smoke') {
-                 const growth = 1.5 - alpha; // Expands as it lives
+                 const growth = Math.max(0.1, 1.5 - alpha); // Expands as it lives
                  ctx.beginPath();
-                 ctx.arc(p.x, p.y, p.size * growth, 0, Math.PI * 2);
+                 ctx.arc(p.x, p.y, Math.max(0.1, p.size * growth), 0, Math.PI * 2);
                  ctx.fill();
             } else if (p.type === 'fire') {
                  ctx.globalAlpha = alpha * 0.8;
                  ctx.beginPath();
-                 ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+                 ctx.arc(p.x, p.y, Math.max(0.1, p.size * alpha), 0, Math.PI * 2);
                  ctx.fill();
                  
                  // Small glow
-                 this.drawGlowCircle(ctx, p.x, p.y, p.size * 2 * alpha, p.color + '44');
+                 this.drawGlowCircle(ctx, p.x, p.y, Math.max(0.1, p.size * 2 * alpha), p.color + '44');
             } else if (p.type === 'distortion') {
                  // Simulated heat wave
                  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
                  ctx.lineWidth = 1;
                  ctx.beginPath();
-                 ctx.arc(p.x, p.y, p.size * (1 - alpha), 0, Math.PI * 2);
+                 ctx.arc(p.x, p.y, Math.max(0.1, p.size * (1 - alpha)), 0, Math.PI * 2);
                  ctx.stroke();
             } else {
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.arc(p.x, p.y, Math.max(0.1, p.size), 0, Math.PI * 2);
                 ctx.fill();
             }
         });

@@ -1,30 +1,36 @@
 import { useState, useCallback, useEffect } from 'react';
 import playerInitialData from '../data/player.json';
 
-import { ChaosOrb } from './Types';
+import { ChaosOrb, Difficulty } from './Types';
 import { checkChaosOrbConflict } from '../systems/forgeSystem';
 import { INITIAL_SKILL_TREE } from '../systems/skillTreeSystem';
+import { saveSystem, SaveData } from '../systems/saveSystem';
 
-// Simple store-like behavior for global access (though React-based for ease)
+// --- INITIAL STATE LOADING ---
+const loadedSave = saveSystem.load();
+
 let globalPlayerState = { 
   ...playerInitialData.player,
-  skillTree: (() => {
+  skillTree: loadedSave ? loadedSave.skillTree : (() => {
     try {
       const saved = localStorage.getItem('nebula_forge_skillTree');
       const parsed = saved ? JSON.parse(saved) : {};
-      // Deep merge with defaults to ensure new skills like 'blizzard' are present
       return {
           ...INITIAL_SKILL_TREE,
           ...parsed,
-          companions: { ...INITIAL_SKILL_TREE.companions, ...(parsed.companions || {}) },
-          specials: { ...INITIAL_SKILL_TREE.specials, ...(parsed.specials || {}) },
-          attributes: { ...INITIAL_SKILL_TREE.attributes, ...(parsed.attributes || {}) }
+          companions: { ...INITIAL_SKILL_TREE.companions, ...(parsed.companions || {}) }
       };
     } catch (e) {
       return INITIAL_SKILL_TREE;
     }
   })(),
-  progression: (() => {
+  // Override with loaded save if available
+  progression: loadedSave ? {
+    level: loadedSave.player.level,
+    exp: loadedSave.player.xp,
+    nextLevelExp: loadedSave.player.nextLevelExp,
+    skillPoints: loadedSave.player.skillPoints
+  } : (() => {
     try {
       const saved = localStorage.getItem('nebula_forge_progression');
       return saved ? JSON.parse(saved) : playerInitialData.player.progression;
@@ -32,11 +38,29 @@ let globalPlayerState = {
       return playerInitialData.player.progression;
     }
   })(),
-  currentGameMode: 'COSMIC_ASCENSION' as any,
-  activePowerUp: {
-    class: null as any, // PowerUpClass | null
-    level: 1 as number // PowerUpLevel
+  inventory: loadedSave ? {
+    runes: loadedSave.inventory.runes,
+    relics: loadedSave.inventory.relics,
+    chaosOrbs: loadedSave.inventory.chaosOrbs
+  } : playerInitialData.player.inventory,
+  equippedRunes: loadedSave ? loadedSave.equipped.runes as any : playerInitialData.player.equippedRunes,
+  equippedRelics: loadedSave ? loadedSave.equipped.relics as any : playerInitialData.player.equippedRelics,
+  equippedChaosOrbs: loadedSave ? loadedSave.equipped.orbs as any : playerInitialData.player.equippedChaosOrbs,
+  currency: loadedSave ? {
+    gold: loadedSave.currency.gold,
+    primordialShards: loadedSave.currency.shards
+  } : playerInitialData.player.currency,
+  progressionAreas: {
+    unlockedAreas: (loadedSave as any)?.progressionAreas?.unlockedAreas || ['area_1'],
+    areaStars: (loadedSave as any)?.progressionAreas?.areaStars || { 'area_1': 0, 'area_2': 0, 'area_3': 0, 'area_4': 0, 'area_5': 0 },
+    maxDifficultyUnlocked: (loadedSave as any)?.progressionAreas?.maxDifficultyUnlocked || 'NORMAL'
   },
+  currentGameMode: loadedSave ? loadedSave.progress.lastModePlayed : 'COSMIC_ASCENSION' as any,
+  activePowerUp: {
+    class: null as any,
+    level: 1 as number
+  },
+  isSaving: false,
   session: {
     playerName: 'PILOTO',
     score: 0,
@@ -47,13 +71,16 @@ let globalPlayerState = {
     bossesKilled: 0,
     lives: 3,
     phase: 1,
+    selectedArea: 'area_1',
+    selectedDifficulty: 'NORMAL',
     phaseStats: {
         score: 0,
         kills: 0,
-        elitesKilled: 0
+        elitesKilled: 0,
+        timeRemaining: 0
     }
   },
-  rankings: (() => {
+  rankings: loadedSave ? loadedSave.rankings : (() => {
     try {
       const saved = localStorage.getItem('nebula_forge_rankings');
       return saved ? JSON.parse(saved) : [];
@@ -65,28 +92,55 @@ let globalPlayerState = {
     shake: 0,
     flash: 0,
     hpChanged: false
-  }
+  },
+  isPaused: false
 };
 
-// Use a simple subject-like pattern to notify subscribers
+// ... existing code ...
+
 const subscribers = new Set<() => void>();
 
 export const getPlayerState = () => globalPlayerState;
 
+// Debounced save
+let saveTimeout: any = null;
+const debouncedSave = (state: any) => {
+    if (saveTimeout) clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+        // Set saving flag
+        updatePlayerState(prev => ({ ...prev, isSaving: true }));
+        
+        saveSystem.save(state);
+        
+        // Clear saving flag after a short delay
+        setTimeout(() => {
+            updatePlayerState(prev => ({ ...prev, isSaving: false }));
+        }, 800);
+    }, 2000);
+};
+
 export const updatePlayerState = (updater: (prev: typeof globalPlayerState) => typeof globalPlayerState) => {
   const nextState = updater(globalPlayerState);
   
-  // Persistence: Only save if these objects changed (they are immutable-updated when modified)
-  if (nextState.skillTree !== globalPlayerState.skillTree) {
-      localStorage.setItem('nebula_forge_skillTree', JSON.stringify(nextState.skillTree));
-  }
-  if (nextState.progression !== globalPlayerState.progression) {
-      localStorage.setItem('nebula_forge_progression', JSON.stringify(nextState.progression));
+  if (nextState === globalPlayerState) return;
+
+  // Persistence: Using the new SaveSystem
+  if (!nextState.isSaving && globalPlayerState.isSaving) {
+      // Don't save if we just cleared the isSaving flag to avoid loops
+  } else {
+      debouncedSave(nextState);
   }
 
   globalPlayerState = nextState;
   subscribers.forEach(sub => sub());
 };
+
+// Add beforeunload listener
+if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', () => {
+        saveSystem.save(globalPlayerState);
+    });
+}
 
 export const updatePlayerName = (name: string) => {
     updatePlayerState(prev => ({
@@ -202,6 +256,34 @@ export const deductShards = (amount: number) => {
     }));
 };
 
+export const deductGold = (amount: number) => {
+    updatePlayerState(prev => ({
+        ...prev,
+        currency: {
+            ...prev.currency,
+            gold: Math.max(0, prev.currency.gold - amount)
+        }
+    }));
+};
+
+export const updateChaosOrb = (updatedOrb: ChaosOrb) => {
+    updatePlayerState(prev => {
+        const index = prev.inventory.chaosOrbs.findIndex(o => o.id === updatedOrb.id);
+        if (index === -1) return prev;
+        
+        const newOrbs = [...prev.inventory.chaosOrbs];
+        newOrbs[index] = updatedOrb;
+        
+        return {
+            ...prev,
+            inventory: {
+                ...prev.inventory,
+                chaosOrbs: newOrbs
+            }
+        };
+    });
+};
+
 export const equipChaosOrb = (orbId: string, slotIndex: number) => {
     updatePlayerState(prev => {
         const orb = prev.inventory.chaosOrbs.find(o => o.id === orbId);
@@ -250,6 +332,73 @@ export const setGameMode = (mode: string) => {
         ...prev,
         currentGameMode: mode
     }));
+};
+
+export const unlockDifficulty = (difficulty: Difficulty) => {
+    const difficulties: Difficulty[] = [
+        Difficulty.NORMAL, Difficulty.HARD, Difficulty.NIGHTMARE, 
+        Difficulty.APOCALYPSE, Difficulty.INFERNO, Difficulty.CHAOS
+    ];
+    
+    updatePlayerState(prev => {
+        const currentIdx = difficulties.indexOf(prev.progressionAreas.maxDifficultyUnlocked as Difficulty);
+        const newIdx = difficulties.indexOf(difficulty);
+        
+        if (newIdx <= currentIdx) return prev;
+        
+        return {
+            ...prev,
+            progressionAreas: {
+                ...prev.progressionAreas,
+                maxDifficultyUnlocked: difficulty
+            }
+        };
+    });
+};
+
+export const setSelectedArea = (areaId: string) => {
+    updatePlayerState(prev => ({
+        ...prev,
+        session: { ...prev.session, selectedArea: areaId }
+    }));
+};
+
+export const setSelectedDifficulty = (difficulty: string) => {
+    updatePlayerState(prev => ({
+        ...prev,
+        session: { ...prev.session, selectedDifficulty: difficulty }
+    }));
+};
+
+export const unlockArea = (areaId: string) => {
+    updatePlayerState(prev => {
+        if (prev.progressionAreas.unlockedAreas.includes(areaId)) return prev;
+        return {
+            ...prev,
+            progressionAreas: {
+                ...prev.progressionAreas,
+                unlockedAreas: [...prev.progressionAreas.unlockedAreas, areaId]
+            }
+        };
+    });
+};
+
+export const setAreaStars = (areaId: string, stars: number) => {
+    updatePlayerState(prev => {
+        const currentStars = prev.progressionAreas.areaStars[areaId] || 0;
+        if (stars <= currentStars) return prev;
+        
+        return {
+            ...prev,
+            progressionAreas: {
+                ...prev.progressionAreas,
+                areaStars: {
+                    ...prev.progressionAreas.areaStars,
+                    [areaId]: stars
+                }
+            }
+        };
+    });
 };
 
 export const setPowerUpClass = (puClass: any) => {
@@ -302,10 +451,13 @@ export const resetSession = () => {
             bossesKilled: 0,
             lives: 3,
             phase: 1,
+            selectedArea: 'area_1',
+            selectedDifficulty: 'NORMAL',
             phaseStats: {
                 score: 0,
                 kills: 0,
-                elitesKilled: 0
+                elitesKilled: 0,
+                timeRemaining: 0
             }
         }
     }));
@@ -320,7 +472,21 @@ export const startNextPhase = () => {
             phaseStats: {
                 score: 0,
                 kills: 0,
-                elitesKilled: 0
+                elitesKilled: 0,
+                timeRemaining: 0
+            }
+        }
+    }));
+};
+
+export const updatePhaseTimeRemaining = (time: number) => {
+    updatePlayerState(prev => ({
+        ...prev,
+        session: {
+            ...prev.session,
+            phaseStats: {
+                ...prev.session.phaseStats,
+                timeRemaining: time
             }
         }
     }));
@@ -388,6 +554,13 @@ export const completeSession = () => {
     updatePlayerState(prev => ({
         ...prev,
         // No double addition here
+    }));
+};
+
+export const setPaused = (paused: boolean) => {
+    updatePlayerState(prev => ({
+        ...prev,
+        isPaused: paused
     }));
 };
 

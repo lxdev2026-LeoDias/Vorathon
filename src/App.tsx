@@ -11,14 +11,19 @@ import { OptionsScreen } from './ui/OptionsScreen';
 import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './ui/HUD';
 import { PowerUpSelection } from './ui/PowerUpSelection';
+import { DifficultySelection } from './ui/DifficultySelection';
+import { AreaSelection } from './ui/AreaSelection';
 import { motion, AnimatePresence } from 'motion/react';
-import { usePlayerState, completeSession, resetSession, startNextPhase } from './core/Store';
+import { usePlayerState, completeSession, resetSession, startNextPhase, unlockArea, setAreaStars, unlockDifficulty } from './core/Store';
 import { Trophy, Target, Coins, Gem, ArrowRight } from 'lucide-react';
 import { stageSystem } from './systems/stageSystem';
 import { bossSystem } from './systems/bossSystem';
 import { enemySystem } from './systems/enemySystem';
 import { StageResults } from './ui/StageResults';
 import { GameOverScreen } from './ui/GameOverScreen';
+import { PauseMenu } from './ui/PauseMenu';
+import areasData from './data/areas.json';
+import { Difficulty } from './core/Types';
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.MAIN_MENU);
@@ -59,38 +64,7 @@ export default function App() {
             {gameState !== GameState.GAME_OVER && <HUD />}
             
             {gameState === GameState.PAUSED && (
-                <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[100] flex flex-col items-center justify-center pointer-events-auto">
-                    <motion.div 
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="bg-slate-900 border border-slate-700 p-10 rounded-2xl flex flex-col items-center gap-6 shadow-2xl"
-                    >
-                        <h2 className="text-4xl font-black italic text-white tracking-tighter">PAUSA</h2>
-                        <div className="flex flex-col gap-3 w-48">
-                            <button 
-                                onClick={() => setGameState(GameState.GAMEPLAY)}
-                                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition-all"
-                            >
-                                CONTINUAR
-                            </button>
-                            <button 
-                                onClick={() => setGameState(GameState.OPTIONS)}
-                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg transition-all"
-                            >
-                                OPÇÕES
-                            </button>
-                            <button 
-                                onClick={() => {
-                                    resetSession();
-                                    setGameState(GameState.MAIN_MENU);
-                                }}
-                                className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg transition-all"
-                            >
-                                MENU PRINCIPAL
-                            </button>
-                        </div>
-                    </motion.div>
-                </div>
+                <PauseMenu onNavigate={setGameState} />
             )}
 
             {gameState === GameState.GAME_OVER && (
@@ -108,11 +82,46 @@ export default function App() {
                 className="w-full h-full"
             >
                 <StageResults onContinue={() => {
-                   startNextPhase();
-                   stageSystem.nextStage();
-                   bossSystem.reset();
-                   enemySystem.reset();
-                   setGameState(GameState.GAMEPLAY);
+                   if (stageSystem.isLastStageInArea()) {
+                       // Area Complete!
+                       const diff = playerState.session.selectedDifficulty as Difficulty;
+                       const starMap: Record<string, number> = {
+                           [Difficulty.NORMAL]: 1,
+                           [Difficulty.HARD]: 2,
+                           [Difficulty.NIGHTMARE]: 3,
+                           [Difficulty.APOCALYPSE]: 4,
+                           [Difficulty.INFERNO]: 5,
+                           [Difficulty.CHAOS]: 6
+                       };
+                       
+                       setAreaStars(playerState.session.selectedArea, starMap[diff] || 1);
+                       
+                       // Unlock next difficulty if this was the last area
+                       if (playerState.session.selectedArea === 'area_5') {
+                           const difficulties: Difficulty[] = [
+                               Difficulty.NORMAL, Difficulty.HARD, Difficulty.NIGHTMARE, 
+                               Difficulty.APOCALYPSE, Difficulty.INFERNO, Difficulty.CHAOS
+                           ];
+                           const currentIdx = difficulties.indexOf(diff);
+                           if (currentIdx !== -1 && currentIdx < difficulties.length - 1) {
+                               unlockDifficulty(difficulties[currentIdx + 1]);
+                           }
+                       }
+
+                       // Unlock next area
+                       const currentAreaIdx = areasData.areas.findIndex((a: any) => a.id === playerState.session.selectedArea);
+                       if (currentAreaIdx !== -1 && currentAreaIdx < areasData.areas.length - 1) {
+                           unlockArea(areasData.areas[currentAreaIdx + 1].id);
+                       }
+                       
+                       setGameState(GameState.STAGE_END);
+                   } else {
+                       startNextPhase();
+                       stageSystem.nextStage();
+                       bossSystem.reset();
+                       enemySystem.reset();
+                       setGameState(GameState.GAMEPLAY);
+                   }
                 }} />
             </motion.div>
         );
@@ -224,8 +233,43 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="w-full h-full"
           >
-            <PowerUpSelection onSelect={() => setGameState(GameState.GAMEPLAY)} />
+            <PowerUpSelection onSelect={() => setGameState(GameState.DIFFICULTY_SELECTION)} />
           </motion.div>
+        );
+      case GameState.DIFFICULTY_SELECTION:
+        return (
+            <motion.div 
+                key="difficulty_selection"
+                initial={{ opacity: 0, x: 100 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -100 }}
+                className="w-full h-full"
+            >
+                <DifficultySelection 
+                    onSelect={() => setGameState(GameState.AREA_SELECTION)} 
+                    onBack={() => setGameState(GameState.POWERUP_SELECTION)}
+                />
+            </motion.div>
+        );
+      case GameState.AREA_SELECTION:
+        return (
+            <motion.div 
+                key="area_selection"
+                initial={{ opacity: 0, x: 100 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -100 }}
+                className="w-full h-full"
+            >
+            <AreaSelection 
+                onSelect={() => {
+                    stageSystem.reset();
+                    bossSystem.reset();
+                    enemySystem.reset();
+                    setGameState(GameState.GAMEPLAY);
+                }} 
+                onBack={() => setGameState(GameState.DIFFICULTY_SELECTION)}
+            />
+            </motion.div>
         );
       default:
         return null;

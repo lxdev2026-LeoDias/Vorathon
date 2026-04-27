@@ -14,7 +14,7 @@ export class BossSystem {
     this.bossDefeated = false;
   }
 
-  spawnBoss(canvasWidth: number, canvasHeight: number, bossId: string) {
+  spawnBoss(canvasWidth: number, canvasHeight: number, bossId: string, hpBonusPercent: number = 0) {
     const data = this.availableBosses.find(b => b.id === bossId);
     if (!data) {
         console.error(`Boss with ID ${bossId} not found!`);
@@ -24,7 +24,7 @@ export class BossSystem {
     const diff = difficultySystem.getModifiers();
     const scaledData = {
         ...data,
-        vida: Math.floor(data.vida * diff.bossHealthMultiplier)
+        vida: Math.floor(data.vida * diff.bossHealthMultiplier * (1 + (hpBonusPercent / 100)))
     };
 
     this.currentBoss = new Boss(canvasWidth + 200, canvasHeight / 2 - 100, scaledData);

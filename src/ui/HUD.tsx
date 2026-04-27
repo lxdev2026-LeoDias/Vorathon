@@ -6,6 +6,7 @@ import { bossSystem } from '../systems/bossSystem';
 import { stageSystem } from '../systems/stageSystem';
 import { PowerUpClass } from '../core/Types';
 import { synergySystem } from '../systems/synergySystem';
+import areasData from '../data/areas.json';
 
 export const HUD: React.FC = () => {
   const playerState = usePlayerState();
@@ -36,6 +37,16 @@ export const HUD: React.FC = () => {
 
   return (
     <div className="absolute inset-0 pointer-events-none p-8 font-sans overflow-hidden">
+      
+      {/* Screen Flash Overlay */}
+      {playerState.feedback.flash > 0 && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: playerState.feedback.flash }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-white z-[100] pointer-events-none"
+          />
+      )}
       
       {/* --- HP & ENERGY SIDEBAR (LEFT) --- */}
       <div className="absolute left-10 inset-y-12 flex flex-col justify-between py-6 pointer-events-none">
@@ -110,11 +121,16 @@ export const HUD: React.FC = () => {
 
       {/* 2. PHASE & TIME (Top Left, next to health sidebar) */}
       <div className="absolute top-8 left-40 flex items-center gap-6 px-6 py-3 bg-black/60 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl z-50">
-          <div className="flex items-center gap-2">
-              <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase">Phase</span>
-              <span className="text-xl font-black text-white italic">{session.phase}</span>
+          <div className="flex flex-col min-w-[120px]">
+              <span className="text-[8px] text-blue-400 font-black tracking-[0.3em] uppercase mb-0.5 truncate">
+                  {areasData.areas.find(a => a.id === session.selectedArea)?.name || 'SETOR DESCONHECIDO'}
+              </span>
+              <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 font-bold tracking-widest uppercase">Phase</span>
+                  <span className="text-xl font-black text-white italic">{session.phase}</span>
+              </div>
           </div>
-          <div className="w-[1px] h-6 bg-white/10" />
+          <div className="w-[1px] h-8 bg-white/10" />
           <div className="flex items-center gap-3">
               <Timer size={16} className="text-blue-400" />
               <span className="text-xl font-black text-blue-100 font-mono italic">{formatTime(stageSystem.stageTime)}</span>
@@ -324,43 +340,51 @@ export const HUD: React.FC = () => {
                   </div>
 
                   {/* Glass Tube Container */}
-                  <div className="w-full h-12 bg-black/80 rounded-full border-2 border-slate-700 p-1.5 relative overflow-hidden shadow-[inset_0_4px_15px_rgba(0,0,0,1)]">
-                      {/* Tube Refraction Highlights */}
-                      <div className="absolute inset-x-8 top-1 h-3 bg-gradient-to-b from-white/10 to-transparent rounded-full pointer-events-none z-30" />
-                      <div className="absolute inset-x-8 bottom-1 h-4 bg-gradient-to-t from-white/5 to-transparent rounded-full pointer-events-none z-30" />
+                  <div className="w-full h-10 bg-black/90 rounded-full border border-slate-700 p-1 relative overflow-hidden shadow-[inset_0_2px_10px_rgba(0,0,0,1)]">
+                      <div className="absolute inset-x-4 top-0.5 h-2 bg-gradient-to-b from-white/10 to-transparent rounded-full pointer-events-none z-30" />
                       
-                      {/* XP PROGRESS FILL */}
                       <motion.div 
                           initial={false}
-                          animate={{ width: `${Math.max(4, xpPercent)}%` }}
+                          animate={{ width: `${Math.min(100, Math.max(0, xpPercent))}%` }}
                           transition={{ duration: 1.2, ease: [0.34, 1.56, 0.64, 1] }}
                           className="h-full relative rounded-full overflow-hidden"
+                          style={{ zIndex: 10 }}
                       >
-                          {/* Energy Plasma Base */}
-                          <div className="absolute inset-0 bg-gradient-to-r from-emerald-900 via-emerald-400 to-cyan-300 shadow-[0_0_40px_rgba(34,211,238,0.7)]" />
+                          {/* Energy Plasma Base - More vibrant green/emerald */}
+                          <div className="absolute inset-0 bg-gradient-to-r from-emerald-600 via-green-400 to-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.8)]" />
                           
-                          {/* Plasma Waves (Simulated glowing wires/energy) */}
+                          {/* Plasma Waves effect */}
                           <motion.div 
-                            animate={{ opacity: [0.4, 0.8, 0.4], scaleY: [1, 1.2, 1] }}
-                            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-                            className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/wave-cut.png')] opacity-20"
+                            animate={{ opacity: [0.4, 0.8, 0.4], x: [-20, 20, -20] }}
+                            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+                            className="absolute inset-0 bg-energy-segments opacity-50 mix-blend-overlay"
                           />
 
-                          {/* Pulsing Energy Core */}
+                          {/* Pulsing Energy Core / Shine */}
                           <motion.div 
-                            animate={{ x: [-200, 800] }}
+                            animate={{ x: [-1000, 1000] }}
                             transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                            className="absolute inset-y-0 w-80 bg-gradient-to-r from-transparent via-cyan-200/40 to-transparent blur-xl"
+                            className="absolute inset-y-0 w-64 bg-gradient-to-r from-transparent via-white/50 to-transparent skew-x-12"
                           />
-                          
-                          {/* Tech Grid Over Fill */}
-                          <div className="absolute inset-0 bg-energy-segments opacity-30 mix-blend-overlay" />
                       </motion.div>
 
-                      {/* Side Metal Caps */}
-                      <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-slate-400 via-slate-700 to-slate-900 border-r border-slate-600 rounded-l-full shadow-2xl z-40" />
-                      <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-400 via-slate-700 to-slate-900 border-l border-slate-600 rounded-r-full shadow-2xl z-40" />
+                      {/* Side Metal Caps - Narrower */}
+                      <div className="absolute left-0 top-0 bottom-0 w-2 bg-gradient-to-r from-slate-400 to-slate-800 rounded-l-full z-40" />
+                      <div className="absolute right-0 top-0 bottom-0 w-2 bg-gradient-to-l from-slate-400 to-slate-800 rounded-r-full z-40" />
                   </div>
+
+                  {/* Saving Indicator */}
+                  {playerState.isSaving && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        className="absolute -top-6 right-4 flex items-center gap-1.5 px-3 py-1 bg-emerald-950/80 border border-emerald-500/30 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                      >
+                        <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_5px_rgba(52,211,153,1)]" />
+                        <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest italic">Sincronizando Core</span>
+                      </motion.div>
+                  )}
               </div>
 
                   {/* MECHANICAL WHEEL CHART (RIGHT) */}

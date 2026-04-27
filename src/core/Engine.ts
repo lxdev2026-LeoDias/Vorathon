@@ -19,7 +19,7 @@ import { powerUpSystem } from '../systems/powerUpSystem';
 import { difficultySystem } from '../systems/difficultySystem';
 import { dialogueSystem } from '../systems/dialogueSystem';
 import { gameOverSystem, GameOverStep } from '../systems/gameOverSystem';
-import { updatePlayerState, getPlayerState, triggerFeedback, evolvePowerUp, addScore, handlePlayerDeath, resetSession, addRune, addRelic, addLife, addRankingEntry } from './Store';
+import { updatePlayerState, getPlayerState, triggerFeedback, evolvePowerUp, addScore, handlePlayerDeath, resetSession, addRune, addRelic, addLife, addRankingEntry, setPaused, updatePhaseTimeRemaining } from './Store';
 import { inputManager } from './InputManager';
 import { GameState } from './GameState';
 import { ScrollDirection, PowerUpClass } from './Types';
@@ -75,9 +75,17 @@ export class Engine {
     const delta = rawDelta * gameOverSystem.timeScale;
 
     // Pause handling
-    if(inputManager.isKeyDown('Escape') && gameOverSystem.step === GameOverStep.NONE) {
+    if(inputManager.isKeyDown('KeyP') && gameOverSystem.step === GameOverStep.NONE) {
         this.setGameState?.(GameState.PAUSED);
+        setPaused(true);
         this.lastTime = performance.now(); // reset timer to avoid huge delta on resume
+    }
+
+    if (getPlayerState().isPaused) {
+        this.lastTime = performance.now();
+        this.draw(); // Still draw the frame
+        requestAnimationFrame(this.loop.bind(this));
+        return;
     }
 
     this.update(delta, rawDelta);
@@ -191,13 +199,17 @@ export class Engine {
     }
 
     if (shouldSpawnBoss) {
-        bossSystem.spawnBoss(this.ctx!.canvas.width, this.ctx!.canvas.height, stageSystem.currentStage.bossId);
+        bossSystem.spawnBoss(this.ctx!.canvas.width, this.ctx!.canvas.height, stageSystem.currentStage.bossId, stageSystem.bonusTimeRemaining);
         triggerFeedback('shake', 40);
         triggerFeedback('flash', 0.5);
     }
 
     if (bossSystem.bossDefeated && !stageSystem.stageCompleted) {
         stageSystem.completeStage();
+        // Update store with time remaining for results screen
+        const finalBonusTime = stageSystem.timeLocked ? stageSystem.bonusTimeRemaining : 0;
+        updatePhaseTimeRemaining(finalBonusTime);
+
         // Clear all bullets and enemies for clean transition
         this.bullets = [];
         enemySystem.enemies = [];
@@ -223,7 +235,8 @@ export class Engine {
 
     // Update Projectiles
     const mode = modeSystem.getCurrentMode();
-    this.bullets.forEach(b => b.update(delta));
+    const playerRenderPos = { x: this.player.x + this.player.width/2, y: this.player.y + this.player.height/2 };
+    this.bullets.forEach(b => b.update(delta, playerRenderPos));
     
     if (mode.direction === ScrollDirection.HORIZONTAL) {
         this.bullets = this.bullets.filter(b => b.x > -150 && b.x < this.ctx!.canvas.width + 150 && b.active);
@@ -383,7 +396,7 @@ export class Engine {
             const diff = difficultySystem.getModifiers();
 
             // Elite shard drop
-            if (e.type === 'ELITE' && Math.random() < diff.shardChance) {
+            if (e.type === 'ELITE' && Math.random() < diff.shardChanceAdd) {
                 dropSystem.spawnShard(e.x, e.y);
             }
 
@@ -488,13 +501,13 @@ export class Engine {
                     ...prev,
                     currency: {
                         ...prev.currency,
-                        gold: d.type === 'GOLD' ? prev.currency.gold + 50 : prev.currency.gold,
-                        primordialShards: d.type === DropType.SHARD ? prev.currency.primordialShards + 1 : prev.currency.primordialShards
+                        gold: d.type === 'GOLD' ? prev.currency.gold + Math.floor(50 * diffMods.goldMultiplier) : prev.currency.gold,
+                        primordialShards: d.type === DropType.SHARD ? prev.currency.primordialShards + Math.floor(1 * diffMods.shardsMultiplier) : prev.currency.primordialShards
                     },
                     session: {
                         ...prev.session,
-                        goldGained: d.type === 'GOLD' ? prev.session.goldGained + 50 : prev.session.goldGained,
-                        shardsGained: d.type === DropType.SHARD ? prev.session.shardsGained + 1 : prev.session.shardsGained
+                        goldGained: d.type === 'GOLD' ? prev.session.goldGained + Math.floor(50 * diffMods.goldMultiplier) : prev.session.goldGained,
+                        shardsGained: d.type === DropType.SHARD ? prev.session.shardsGained + Math.floor(1 * diffMods.shardsMultiplier) : prev.session.shardsGained
                     }
                 }));
             }

@@ -89,9 +89,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
     if (!selectedMode) return;
     updatePlayerName(tempName);
     resetSession();
-    stageSystem.reset();
-    bossSystem.reset();
-    enemySystem.reset();
     modeSystem.setMode(selectedMode);
     setGameMode(selectedMode);
     onNavigate(GameState.POWERUP_SELECTION);
