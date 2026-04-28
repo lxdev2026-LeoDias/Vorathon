@@ -1,4 +1,5 @@
-import { Entity } from './Types';
+import { Entity, EntityType } from './Types';
+import { triggerFeedback } from './Store';
 import { effectsSystem } from '../systems/effectsSystem';
 import { BulletType } from './Bullet';
 
@@ -14,6 +15,7 @@ export interface BossData {
 }
 
 export class Boss implements Entity {
+  entityType: EntityType = EntityType.BOSS;
   x: number;
   y: number;
   width: number = 140;
@@ -29,6 +31,7 @@ export class Boss implements Entity {
   phase: number = 1;
   stateTimer: number = 0;
   frozenTimer: number = 0;
+  isActive: boolean = false;
 
   get isFrozen() { return this.frozenTimer > 0; }
 
@@ -48,8 +51,9 @@ export class Boss implements Entity {
   }
 
   takeDamage(amount: number) {
+    if (!this.isActive) return;
     if (this.isFrozen && amount > 0) {
-      this.hp -= amount * 100;
+      this.hp -= amount * 2;
       if (this.hp < 0) this.hp = 0;
       return;
     }
@@ -57,7 +61,13 @@ export class Boss implements Entity {
     this.blinkTimer = 0.1;
   }
 
-  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
+  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type?: BulletType, dmgMult?: number, isPrimary?: boolean) => void) {
+    if (!this.isActive) {
+        const margin = 100; // Bosses are larger
+        if (this.x < canvasWidth + margin && this.y > -margin && this.y < canvasHeight + margin) {
+            this.isActive = true;
+        }
+    }
     if (this.blinkTimer > 0) this.blinkTimer -= delta;
     if (this.frozenTimer > 0) this.frozenTimer -= delta;
     this.stateTimer += delta;
@@ -110,11 +120,22 @@ export class Boss implements Entity {
         }
     }
 
-    // Phase Change logic
-    if (this.hp < this.maxHp * 0.4 && this.phase === 1) {
+    // Phase Change logic (New Requirement)
+    if (this.hp < this.maxHp * 0.7 && this.phase === 1) {
         this.phase = 2;
-        this.shootInterval *= 0.7;
-        this.speed *= 1.2;
+        this.shootInterval *= 0.8;
+        triggerFeedback('shake', 15);
+        triggerFeedback('flash', 0.3);
+        effectsSystem.addFloatingText(this.x + this.width/2, this.y, "PHASE 2: ENRAGED", this.data.tema, true);
+    }
+
+    if (this.hp < this.maxHp * 0.3 && this.phase === 2) {
+        this.phase = 3;
+        this.shootInterval *= 0.7; // Even faster
+        this.speed *= 1.4; // More aggressive movement
+        triggerFeedback('shake', 25);
+        triggerFeedback('flash', 0.5);
+        effectsSystem.addFloatingText(this.x + this.width/2, this.y, "PHASE 3: DESPERATION", '#ffffff', true);
     }
 
     // Simple Shooting Logic
@@ -128,75 +149,96 @@ export class Boss implements Entity {
   }
 
   private updateHades(delta: number) {
-      this.y += Math.sin(this.stateTimer) * this.speed * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += Math.sin(this.stateTimer) * this.speed * delta * speedMult;
   }
 
   private updatePoseidon(delta: number) {
-      this.y += Math.cos(this.stateTimer * 0.5) * this.speed * 2 * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += Math.cos(this.stateTimer * 0.5) * this.speed * 2 * delta * speedMult;
   }
 
   private updateZeus(delta: number) {
-      if (Math.random() < 0.02) this.moveDir *= -1;
-      this.y += this.moveDir * this.speed * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      if (Math.random() < 0.02 * speedMult) this.moveDir *= -1;
+      this.y += this.moveDir * this.speed * delta * speedMult;
       if (this.y < 0 || this.y > 500) this.moveDir *= -1;
   }
 
   private updateAres(delta: number, playerPos: { x: number, y: number }) {
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
       const dy = playerPos.y - (this.y + this.height/2);
-      this.y += Math.sign(dy) * this.speed * delta * 0.8;
+      this.y += Math.sign(dy) * this.speed * delta * 0.8 * speedMult;
   }
 
   private updateAthena(delta: number, playerPos: { x: number, y: number }) {
-      this.y += this.moveDir * this.speed * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += this.moveDir * this.speed * delta * speedMult;
       if (this.y > 400 || this.y < 100) this.moveDir *= -1;
       // Athena avoids player Y slightly
       const dy = playerPos.y - (this.y + this.height/2);
-      if (Math.abs(dy) < 50) this.y -= Math.sign(dy) * 50 * delta;
+      if (Math.abs(dy) < 50) this.y -= Math.sign(dy) * 50 * delta * speedMult;
   }
 
   private updateHermes(delta: number) {
-      this.y += Math.sin(this.stateTimer * 4) * this.speed * delta;
-      this.x += Math.cos(this.stateTimer * 2) * 50 * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += Math.sin(this.stateTimer * 4) * this.speed * delta * speedMult;
+      this.x += Math.cos(this.stateTimer * 2) * 50 * delta * speedMult;
   }
 
   private updateArtemis(delta: number) {
-      this.y += this.moveDir * this.speed * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += this.moveDir * this.speed * delta * speedMult;
       if (this.y > 450 || this.y < 50) this.moveDir *= -1;
   }
 
   private updateHephaestus(delta: number) {
-      this.y += this.moveDir * (this.speed * 0.5) * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += this.moveDir * (this.speed * 0.5) * delta * speedMult;
       if (this.y > 350 || this.y < 150) this.moveDir *= -1;
   }
 
   private updateChronos(delta: number) {
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
       const speedMod = Math.sin(this.stateTimer) > 0 ? 2 : 0.2;
-      this.y += this.moveDir * this.speed * speedMod * delta;
+      this.y += this.moveDir * this.speed * speedMod * delta * speedMult;
       if (this.y > 450 || this.y < 50) this.moveDir *= -1;
   }
 
   private updateNyx(delta: number) {
-      this.y += Math.sin(this.stateTimer * 0.2) * this.speed * delta;
+      const speedMult = this.phase === 3 ? 1.5 : this.phase === 2 ? 1.2 : 1;
+      this.y += Math.sin(this.stateTimer * 0.2) * this.speed * delta * speedMult;
   }
 
-  private fireAttack(playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
+  private fireAttack(playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type?: BulletType, dmgMult?: number) => void) {
       const dx = playerPos.x - this.x;
       const dy = playerPos.y - (this.y + this.height/2);
       const angle = Math.atan2(dy, dx);
 
       if (this.data.id === 'boss_nyx') {
-          for(let i=-2; i<=2; i++) spawnBullet(this.x, this.y + this.height/2, angle + i*0.2, true);
+          const bulletsCount = this.phase === 3 ? 7 : this.phase === 2 ? 5 : 3;
+          for(let i=-(bulletsCount-1)/2; i<=(bulletsCount-1)/2; i++) spawnBullet(this.x, this.y + this.height/2, angle + i*0.2, EntityType.BOSS);
       } else if (this.data.id === 'boss_poseidon') {
-          spawnBullet(this.x, this.y + this.height/2, Math.PI, true);
-          spawnBullet(this.x, this.y + 40, Math.PI, true);
-          spawnBullet(this.x, this.y + this.height - 40, Math.PI, true);
+          spawnBullet(this.x, this.y + this.height/2, Math.PI, EntityType.BOSS);
+          spawnBullet(this.x, this.y + 40, Math.PI, EntityType.BOSS);
+          spawnBullet(this.x, this.y + this.height - 40, Math.PI, EntityType.BOSS);
+          if (this.phase >= 2) {
+              spawnBullet(this.x, this.y + 20, Math.PI, EntityType.BOSS);
+              spawnBullet(this.x, this.y + this.height - 20, Math.PI, EntityType.BOSS);
+          }
       } else if (this.data.id === 'boss_zeus') {
-          spawnBullet(this.x, this.y + this.height/2, angle + (Math.random()-0.5), true);
+          spawnBullet(this.x, this.y + this.height/2, angle + (Math.random()-0.5), EntityType.BOSS);
+          if (this.phase >= 2) spawnBullet(this.x, this.y + this.height/2 - 20, angle + (Math.random()-0.5), EntityType.BOSS);
+          if (this.phase === 3) spawnBullet(this.x, this.y + this.height/2 + 20, angle + (Math.random()-0.5), EntityType.BOSS);
       } else {
-          spawnBullet(this.x, this.y + this.height/2, angle, true);
-          if (this.phase === 2) {
-              spawnBullet(this.x, this.y + this.height/2, angle + 0.3, true);
-              spawnBullet(this.x, this.y + this.height/2, angle - 0.3, true);
+          spawnBullet(this.x, this.y + this.height/2, angle, EntityType.BOSS);
+          if (this.phase >= 2) {
+              spawnBullet(this.x, this.y + this.height/2, angle + 0.3, EntityType.BOSS);
+              spawnBullet(this.x, this.y + this.height/2, angle - 0.3, EntityType.BOSS);
+          }
+          if (this.phase === 3) {
+              spawnBullet(this.x, this.y + this.height/2, angle + 0.6, EntityType.BOSS);
+              spawnBullet(this.x, this.y + this.height/2, angle - 0.6, EntityType.BOSS);
           }
       }
   }

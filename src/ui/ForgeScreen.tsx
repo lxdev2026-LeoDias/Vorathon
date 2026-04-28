@@ -14,7 +14,7 @@ interface ForgeScreenProps {
 export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
   const playerState = usePlayerState();
   const { equippedRunes, equippedRelics, equippedChaosOrbs, inventory, currency } = playerState;
-  const [hoveredItem, setHoveredItem] = useState<{ item: any, type?: string, pos: { x: number, y: number }, side?: 'left' | 'right' } | null>(null);
+  const [hoveredItem, setHoveredItem] = useState<{ item: any, type?: string, pos: { x: number, y: number }, side?: 'left' | 'right', vertical?: 'top' | 'bottom' } | null>(null);
   const [selectedItemMenu, setSelectedItemMenu] = useState<{ item: any, pos: { x: number, y: number }, type: 'rune' | 'relic' | 'chaos' } | null>(null);
   
   // Selection for forging
@@ -38,22 +38,20 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
 
   const handleMouseMove = (e: React.MouseEvent, item: any, type?: 'rune' | 'relic' | 'chaos') => {
     if (ritualPhase !== 'IDLE') return; // Disable during ritual
-    // Determine tooltip position based on item type
-    let x = e.clientX + 15;
-    let y = e.clientY + 15;
-    let side: 'left' | 'right' = 'right';
-
-    if (type === 'rune') {
-        // Runas (right side of screen) should show tooltip to the left
-        x = e.clientX - 15;
-        side = 'left';
-    }
+    
+    // Determine screen position to decide which way to open the tooltip
+    const x = e.clientX;
+    const y = e.clientY;
+    
+    const side: 'left' | 'right' = x > window.innerWidth / 2 ? 'left' : 'right';
+    const vertical: 'top' | 'bottom' = y > window.innerHeight / 2 ? 'top' : 'bottom';
 
     setHoveredItem({
         item,
         type,
         pos: { x, y },
-        side
+        side,
+        vertical
     });
   };
 
@@ -407,9 +405,9 @@ export const ForgeScreen: React.FC<ForgeScreenProps> = ({ onBack }) => {
                 exit={{ opacity: 0, scale: 0.95 }}
                 className={`fixed z-[1000] pointer-events-none ${hoveredItem.item.category === 'CHAOS' ? 'min-w-[400px] p-6' : 'p-4 max-w-xs'} bg-slate-900/95 border border-slate-700/50 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-all duration-200`}
                 style={{ 
-                    left: hoveredItem.pos.x, 
-                    top: hoveredItem.pos.y,
-                    transform: hoveredItem.side === 'left' ? 'translateX(-100%)' : 'none'
+                    left: hoveredItem.pos.x + (hoveredItem.side === 'left' ? -20 : 20), 
+                    top: hoveredItem.pos.y + (hoveredItem.vertical === 'top' ? -20 : 20),
+                    transform: `${hoveredItem.side === 'left' ? 'translateX(-100%)' : ''} ${hoveredItem.vertical === 'top' ? 'translateY(-100%)' : ''}`
                 }}
             >
                 {hoveredItem.item.category === 'CHAOS' ? (

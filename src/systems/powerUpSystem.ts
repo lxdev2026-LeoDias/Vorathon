@@ -1,4 +1,4 @@
-import { PowerUpClass, PowerUpLevel } from '../core/Types';
+import { PowerUpClass, PowerUpLevel, EntityType } from '../core/Types';
 import { getPlayerState } from '../core/Store';
 
 export interface PowerUpEffect {
@@ -9,7 +9,11 @@ export interface PowerUpEffect {
 }
 
 export class PowerUpSystem {
-    getEffect(): PowerUpEffect {
+    getEffect(type: EntityType = EntityType.PLAYER): PowerUpEffect {
+        if (type !== EntityType.PLAYER) {
+            return { damageMult: 1, shotCount: 1, bulletColor: '#60a5fa' };
+        }
+
         const { activePowerUp } = getPlayerState();
         const { class: puClass, level } = activePowerUp;
 

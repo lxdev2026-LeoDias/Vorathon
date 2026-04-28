@@ -1,4 +1,4 @@
-import { Entity, PlayerType, ScrollDirection } from './Types';
+import { Entity, PlayerType, ScrollDirection, EntityType } from './Types';
 import { inputManager } from '../core/InputManager';
 import { getPlayerState, updatePlayerState, triggerFeedback } from './Store';
 import { effectSystem } from '../systems/effectSystem';
@@ -22,6 +22,7 @@ interface ActiveSpecial {
 }
 
 export class Player implements Entity {
+  entityType: EntityType = EntityType.PLAYER;
   x: number;
   y: number;
   width: number = 64;
@@ -49,7 +50,7 @@ export class Player implements Entity {
     companionSystem.init();
   }
 
-  update(delta: number, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, extraDmgMult?: number) => void) {
+  update(delta: number, spawnBullet: (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type?: BulletType, extraDmgMult?: number, isPrimary?: boolean) => void) {
     const state = getPlayerState();
     const mode = modeSystem.getCurrentMode();
     const tree = state.skillTree || INITIAL_SKILL_TREE;
@@ -195,36 +196,36 @@ export class Player implements Entity {
           const shotColor = plasmaColors[pLevel];
 
           if (pLevel === 1) {
-              spawnBullet(bx, by, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, true);
           } else if (pLevel === 2) {
-              spawnBullet(bx, by - 8, angle, false, shotColor, BulletType.NORMAL, dmgMult);
-              spawnBullet(bx, by + 8, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by - 8, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, true);
+              spawnBullet(bx, by + 8, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, false);
           } else if (pLevel === 3) {
-              spawnBullet(bx, by, angle, false, shotColor, BulletType.NORMAL, dmgMult);
-              spawnBullet(bx, by - 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
-              spawnBullet(bx, by + 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, true);
+              spawnBullet(bx, by - 12, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, false);
+              spawnBullet(bx, by + 12, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, false);
           } else if (pLevel === 4) {
-              spawnBullet(bx, by, angle, false, shotColor, BulletType.NORMAL, dmgMult);
-              spawnBullet(bx, by - 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
-              spawnBullet(bx, by + 12, angle, false, shotColor, BulletType.NORMAL, dmgMult);
+              spawnBullet(bx, by, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, true);
+              spawnBullet(bx, by - 12, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, false);
+              spawnBullet(bx, by + 12, angle, EntityType.PLAYER, shotColor, BulletType.NORMAL, dmgMult, false);
 
               this.plasmaShotCount++;
               if (this.plasmaShotCount >= 5) {
                   this.plasmaShotCount = 0;
                   // Level 4: Pulse ball every 5 shots, 3x damage
-                  spawnBullet(bx, by, angle, false, '#60a5fa', BulletType.PLASMA, dmgMult * 3);
+                  spawnBullet(bx, by, angle, EntityType.PLAYER, '#60a5fa', BulletType.PLASMA, dmgMult * 3);
               }
           }
       } else {
-          spawnBullet(bx, by, angle, false);
+          spawnBullet(bx, by, angle, EntityType.PLAYER);
       }
 
       // Handle extra projectiles bonus from Chaos Orbs
       if (mods.extraProjectiles > 0) {
           for (let i = 0; i < mods.extraProjectiles; i++) {
               const offset = (i + 1) * 0.15;
-              spawnBullet(bx, by, angle + offset, false);
-              spawnBullet(bx, by, angle - offset, false);
+              spawnBullet(bx, by, angle + offset, EntityType.PLAYER, undefined, BulletType.NORMAL, 1, false);
+              spawnBullet(bx, by, angle - offset, EntityType.PLAYER, undefined, BulletType.NORMAL, 1, false);
           }
       }
     }
@@ -300,7 +301,8 @@ export class Player implements Entity {
            visualEffectSystem.emitEnergySpark(laserX + Math.random() * 200, ay, '#ffffff');
         }
 
-        [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
+        const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter((e: any) => e && e.isActive);
+        targets.forEach((e: any) => {
             if (e.x < laserX + laserWidth && e.x + e.width > laserX &&
                 e.y < laserY + laserHeight && e.y + e.height > laserY) {
                 e.takeDamage(damage);
@@ -324,7 +326,8 @@ export class Player implements Entity {
             visualEffectSystem.emitFlame(centerX + Math.cos(angle) * dist, centerY + Math.sin(angle) * dist, 15);
         }
 
-        [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
+        const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter((e: any) => e && e.isActive);
+        targets.forEach((e: any) => {
             const dist = Math.sqrt((e.x + e.width / 2 - centerX)**2 + (e.y + e.height / 2 - centerY)**2);
             if (dist < radius) {
                 e.takeDamage(damage);
@@ -340,7 +343,7 @@ export class Player implements Entity {
             let targetX = 0;
             let targetY = 0;
             
-            const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
+            const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter((e: any) => e && e.isActive);
             const shouldTarget = Math.random() > 0.5 && targets.length > 0;
 
             if (shouldTarget) {
@@ -377,7 +380,11 @@ export class Player implements Entity {
         }
     } else if (this.activeSpecial.id === 'blizzard') {
         visualEffectSystem.emitSnowflake(Math.random() * 2000, -100, level * 2);
-        [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean).forEach((e: any) => {
+        const targets: any[] = enemySystem.enemies.filter(e => e.isActive);
+        if (bossSystem.currentBoss && bossSystem.currentBoss.isActive) {
+            targets.push(bossSystem.currentBoss);
+        }
+        targets.forEach((e: any) => {
             e.freeze(0.4);
             e.takeDamage(damage);
         });

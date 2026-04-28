@@ -63,7 +63,16 @@ export interface ChaosOrb extends BaseItem {
 export interface Rune extends BaseItem {}
 export interface Relic extends BaseItem {}
 
+export enum EntityType {
+  PLAYER = 'PLAYER',
+  BOT = 'BOT',
+  ENEMY = 'ENEMY',
+  BOSS = 'BOSS'
+}
+
 export interface Entity {
+  entityType: EntityType;
+  isActive?: boolean;
   x: number;
   y: number;
   width: number;
@@ -103,6 +112,15 @@ export enum Difficulty {
   APOCALYPSE = 'APOCALYPSE',
   INFERNO = 'INFERNO',
   CHAOS = 'CHAOS'
+}
+
+export interface RankingEntry {
+  name: string;
+  score: number;
+  mode: string;
+  date: string;
+  areaId: string;
+  difficulty: Difficulty;
 }
 
 export interface Area {

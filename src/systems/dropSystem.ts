@@ -1,6 +1,7 @@
-import { Entity } from '../core/Types';
+import { Entity, EntityType } from '../core/Types';
 import { difficultySystem } from './difficultySystem';
 import { eventSystem } from './eventSystem';
+import { getPlayerState } from '../core/Store';
 import runesData from '../data/runes.json';
 import relicsData from '../data/relics.json';
 
@@ -14,6 +15,7 @@ export enum DropType {
 }
 
 export class DropEntity implements Entity {
+  entityType: EntityType = EntityType.BOT;
   x: number;
   y: number;
   width: number = 16;
@@ -134,6 +136,13 @@ export class DropEntity implements Entity {
 
 export class DropSystem {
   drops: DropEntity[] = [];
+  private phaseLifeDrops: number = 0;
+  private lastPhase: number = 1;
+
+  reset() {
+      this.drops = [];
+      this.phaseLifeDrops = 0;
+  }
 
   rollDrop(x: number, y: number, chance: number, isElite: boolean = false, isBoss: boolean = false) {
     const diff = difficultySystem.getModifiers();
@@ -143,10 +152,25 @@ export class DropSystem {
       this.drops.push(new DropEntity(x, y, DropType.GOLD));
     }
 
-    // Life Drop (Elite: 5%, Boss: 10%)
-    const lifeChance = isBoss ? 10 : (isElite ? 5 : 0);
-    if (lifeChance > 0 && Math.random() * 100 < lifeChance) {
-        this.drops.push(new DropEntity(x, y, DropType.LIFE));
+    // Life Drop (New Rules)
+    // Only Elites can drop, Max 2 per phase
+    if (isElite && this.phaseLifeDrops < 2) {
+        const playerState = getPlayerState();
+        const playerHpPercent = (playerState.stats.hp / playerState.stats.maxHp) * 100;
+
+        let rollLife = false;
+        if (this.phaseLifeDrops === 0) {
+            // First drop: 80% chance
+            if (Math.random() < 0.8) rollLife = true;
+        } else if (this.phaseLifeDrops === 1) {
+            // Second drop: 5% chance, only if HP < 40%
+            if (playerHpPercent < 40 && Math.random() < 0.05) rollLife = true;
+        }
+
+        if (rollLife) {
+            this.drops.push(new DropEntity(x, y, DropType.LIFE));
+            this.phaseLifeDrops++;
+        }
     }
 
     // Celestial Drops (Runes/Relics)
@@ -190,6 +214,14 @@ export class DropSystem {
   }
 
   update(delta: number, playerPos: { x: number, y: number }) {
+    const playerState = getPlayerState();
+    
+    // Reset life drops on phase change
+    if (playerState.session.phase !== this.lastPhase) {
+        this.phaseLifeDrops = 0;
+        this.lastPhase = playerState.session.phase;
+    }
+
     this.drops.forEach(d => d.update(delta, playerPos));
     
     // Check for pending event reward

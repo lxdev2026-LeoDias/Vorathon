@@ -1,8 +1,8 @@
-import { Entity } from './Types';
+import { Entity, EntityType } from './Types';
 import { visualEffectSystem } from '../systems/visualEffectSystem';
 import { getPlayerState, updatePlayerState } from './Store';
 import { difficultySystem } from '../systems/difficultySystem';
-import { enemySystem } from '../systems/enemySystem';
+import { enemySystem, EnemyType } from '../systems/enemySystem';
 import { bossSystem } from '../systems/bossSystem';
 
 export enum BulletType {
@@ -13,6 +13,7 @@ export enum BulletType {
 }
 
 export class Bullet implements Entity {
+  entityType: EntityType = EntityType.BOT; // Default or maybe I should use ownerType property
   x: number;
   y: number;
   width: number = 20;
@@ -20,36 +21,38 @@ export class Bullet implements Entity {
   speed: number = 900;
   angle: number;
   isEnemyBullet: boolean;
+  ownerType: EntityType;
   active: boolean = true;
   color?: string;
-  type: BulletType = BulletType.NORMAL;
+  bulletType: BulletType = BulletType.NORMAL;
   damageMult: number = 1;
   private trailTimer: number = 0;
   private target: Entity | null = null;
 
-  constructor(x: number, y: number, angle: number, isEnemy: boolean = false, color?: string, type: BulletType = BulletType.NORMAL, damageMult: number = 1) {
+  constructor(x: number, y: number, angle: number, ownerType: EntityType = EntityType.PLAYER, color?: string, type: BulletType = BulletType.NORMAL, damageMult: number = 1) {
     this.x = x;
     this.y = y;
     this.angle = angle;
-    this.isEnemyBullet = isEnemy;
+    this.ownerType = ownerType;
+    this.isEnemyBullet = ownerType === EntityType.ENEMY || ownerType === EntityType.BOSS;
     this.color = color;
-    this.type = type;
+    this.bulletType = type;
     this.damageMult = damageMult;
 
-    if (isEnemy) {
+    if (this.isEnemyBullet) {
         this.speed = 400;
         this.width = 15;
     }
 
-    if (this.type === BulletType.MISSILE) {
+    if (this.bulletType === BulletType.MISSILE) {
         this.width = 25;
         this.height = 10;
         this.speed = 600;
-    } else if (this.type === BulletType.PLASMA) {
+    } else if (this.bulletType === BulletType.PLASMA) {
         this.width = 30;
         this.height = 30;
         this.speed = 500;
-    } else if (this.type === BulletType.ARC) {
+    } else if (this.bulletType === BulletType.ARC) {
         this.width = 40;
         this.height = 15;
         this.speed = 1200;
@@ -61,7 +64,7 @@ export class Bullet implements Entity {
   }
 
   update(delta: number, playerPos?: { x: number, y: number }) {
-    if (this.type === BulletType.MISSILE) {
+    if (this.bulletType === BulletType.MISSILE) {
         // Dynamic re-targeting if current target is invalid
         if (!this.target || (this.target as any).hp <= 0) {
             this.findNewTarget();
@@ -108,13 +111,13 @@ export class Bullet implements Entity {
             this.x, 
             this.y, 
             trailColor, 
-            (isOverloaded || this.type !== BulletType.NORMAL) ? 4 : 1.5
+            (isOverloaded || this.bulletType !== BulletType.NORMAL) ? 4 : 1.5
         );
     }
   }
 
   private findNewTarget() {
-      if (bossSystem.currentBoss) {
+      if (bossSystem.currentBoss && bossSystem.currentBoss.x < 1000) {
           this.target = bossSystem.currentBoss;
           return;
       }
@@ -122,7 +125,7 @@ export class Bullet implements Entity {
       const enemies = enemySystem.enemies.filter(e => e.hp > 0);
       if (enemies.length > 0) {
           // Prefer Elites, then closest
-          const elites = enemies.filter(e => e.type === 'ELITE');
+          const elites = enemies.filter(e => e.type === EnemyType.ELITE);
           this.target = this.findClosest(elites.length > 0 ? elites : enemies);
       } else {
           this.target = null;
@@ -153,7 +156,7 @@ export class Bullet implements Entity {
     const defaultMainColor = isOverloaded ? '#93c5fd' : '#60a5fa';
     const mainColor = this.isEnemyBullet ? '#ef4444' : (this.color || defaultMainColor);
     
-    if (this.type === BulletType.NORMAL) {
+    if (this.bulletType === BulletType.NORMAL) {
         // 1. Long Energy Trail
         if (!this.isEnemyBullet) {
             ctx.save();
@@ -177,14 +180,14 @@ export class Bullet implements Entity {
         ctx.lineTo(-beamLength, beamHeight);
         ctx.closePath();
         ctx.fill();
-    } else if (this.type === BulletType.MISSILE) {
+    } else if (this.bulletType === BulletType.MISSILE) {
         ctx.fillStyle = mainColor;
         ctx.beginPath();
         ctx.roundRect(-this.width/2, -this.height/2, this.width, this.height, 4);
         ctx.fill();
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(this.width/4, -this.height/4, this.width/4, this.height/2);
-    } else if (this.type === BulletType.PLASMA) {
+    } else if (this.bulletType === BulletType.PLASMA) {
         const pulse = 1 + Math.sin(performance.now() / 100) * 0.1;
         ctx.fillStyle = mainColor;
         ctx.shadowBlur = 30; // Increased blur
@@ -209,7 +212,7 @@ export class Bullet implements Entity {
         ctx.beginPath();
         ctx.arc(0, 0, (this.width/4) * pulse, 0, Math.PI * 2);
         ctx.fill();
-    } else if (this.type === BulletType.ARC) {
+    } else if (this.bulletType === BulletType.ARC) {
         ctx.strokeStyle = mainColor;
         ctx.lineWidth = 3;
         ctx.shadowBlur = 15;
@@ -223,7 +226,7 @@ export class Bullet implements Entity {
     }
     
     // 3. High Intensity Core (for normal bullets)
-    if (this.type === BulletType.NORMAL) {
+    if (this.bulletType === BulletType.NORMAL) {
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.ellipse(0, 0, 4, 1.5, 0, 0, Math.PI * 2);

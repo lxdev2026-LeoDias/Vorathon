@@ -5,6 +5,7 @@ import { dialogueSystem } from './dialogueSystem';
 import { enemySystem } from './enemySystem';
 import { effectsSystem } from './effectsSystem';
 import { bossSystem } from './bossSystem';
+import { Entity, EntityType } from '../core/Types';
 
 export enum CompanionType {
     SUMMONER = 'summoner',
@@ -33,10 +34,13 @@ interface SpeechBubble {
     maxTimer: number;
 }
 
-export class Companion {
-    type: CompanionType;
+export class Companion implements Entity {
+    entityType: EntityType = EntityType.BOT;
+    companionType: CompanionType;
     x: number = 0;
     y: number = 0;
+    width: number = 28;
+    height: number = 28;
     targetX: number = 0;
     targetY: number = 0;
     
@@ -55,7 +59,7 @@ export class Companion {
     private icon: string;
 
     constructor(type: CompanionType) {
-        this.type = type;
+        this.companionType = type;
         this.maxCooldown = type === CompanionType.SUMMONER ? 20 : (type === CompanionType.SUPPORTER ? 25 : 0.5);
         this.cooldown = this.maxCooldown;
         
@@ -81,7 +85,7 @@ export class Companion {
     update(delta: number, playerX: number, playerY: number, playerWidth: number, playerHeight: number, spawnBullet: any) {
         const time = performance.now() / 1000;
         const tree = getPlayerState().skillTree;
-        const level = (tree.companions as any)[this.type] || 0;
+        const level = (tree.companions as any)[this.companionType] || 0;
         
         if (level === 0) return;
 
@@ -89,13 +93,13 @@ export class Companion {
         let offsetDx = -60;
         let offsetDy = 0;
         
-        if (this.type === CompanionType.SUMMONER) {
+        if (this.companionType === CompanionType.SUMMONER) {
             offsetDx = -80;
             offsetDy = playerHeight + 40;
-        } else if (this.type === CompanionType.SHOOTER) {
+        } else if (this.companionType === CompanionType.SHOOTER) {
             offsetDx = -60;
             offsetDy = playerHeight / 2;
-        } else if (this.type === CompanionType.SUPPORTER) {
+        } else if (this.companionType === CompanionType.SUPPORTER) {
             offsetDx = -80;
             offsetDy = -40;
         }
@@ -107,7 +111,7 @@ export class Companion {
             this.pulseIntensity = 1.0;
             
             // Move away from ship during execution (only for Summoner and Supporter)
-            if (this.type !== CompanionType.SHOOTER) {
+            if (this.companionType !== CompanionType.SHOOTER) {
                 offsetDx -= 80; 
             }
 
@@ -115,10 +119,10 @@ export class Companion {
                 this.state = CompanionState.COOLDOWN;
                 this.cooldown = this.maxCooldown;
                 // Cooldown scaling
-                if (this.type === CompanionType.SUPPORTER) {
+                if (this.companionType === CompanionType.SUPPORTER) {
                     const cds = [25, 20, 15];
                     this.cooldown = cds[level - 1] || 25;
-                } else if (this.type === CompanionType.SUMMONER) {
+                } else if (this.companionType === CompanionType.SUMMONER) {
                     const cds = [28, 21, 17]; // Increased by 40% (20->28, 15->21, 12->17)
                     this.cooldown = cds[level - 1] || 28;
                 }
@@ -162,7 +166,7 @@ export class Companion {
     private triggerAbility(spawnBullet: any, level: number) {
         this.state = CompanionState.EXECUTING;
         
-        switch (this.type) {
+        switch (this.companionType) {
             case CompanionType.SUMMONER:
                 this.executionTimer = 1.5;
                 this.say(["Singularidade!", "Horizonte de Eventos!", "Gravidade Infinita!", "Vem pro abismo!"], 2);
@@ -224,8 +228,8 @@ export class Companion {
     }
 
     private executeSupporterBehavior(level: number) {
-        const maxShieldValues = [120, 250, 500];
-        const amount = maxShieldValues[level - 1] || 120;
+        const maxShieldValues = [40, 80, 120];
+        const amount = maxShieldValues[level - 1] || 40;
         
         visualEffectSystem.emitLightningBolt(this.x, this.y, this.targetX + 80, this.targetY, this.color, 3);
         
@@ -241,9 +245,9 @@ export class Companion {
         const bx = this.x + 24;
         const by = this.y;
         
-        spawnBullet(bx, by, 0, false, undefined, BulletType.NORMAL, 1.2);
-        if (level >= 2) spawnBullet(bx, by, -0.2, false, undefined, BulletType.NORMAL, 1.0);
-        if (level >= 3) spawnBullet(bx, by, 0.2, false, undefined, BulletType.NORMAL, 1.0);
+        spawnBullet(bx, by, 0, EntityType.BOT, undefined, BulletType.NORMAL, 1.2);
+        if (level >= 2) spawnBullet(bx, by, -0.2, EntityType.BOT, undefined, BulletType.NORMAL, 1.0);
+        if (level >= 3) spawnBullet(bx, by, 0.2, EntityType.BOT, undefined, BulletType.NORMAL, 1.0);
         
         visualEffectSystem.emitShotParticles(bx, by, this.color);
     }
@@ -255,11 +259,11 @@ export class Companion {
 
     draw(ctx: CanvasRenderingContext2D) {
         const tree = getPlayerState().skillTree;
-        const level = (tree.companions as any)[this.type] || 0;
+        const level = (tree.companions as any)[this.companionType] || 0;
         if (level === 0) return;
 
         const time = performance.now() / 1000;
-        const idleBob = Math.sin(time * 3 + (this.type === CompanionType.SUMMONER ? 1 : 0)) * 5;
+        const idleBob = Math.sin(time * 3 + (this.companionType === CompanionType.SUMMONER ? 1 : 0)) * 5;
 
         ctx.save();
         ctx.translate(this.x, this.y + idleBob);
@@ -408,7 +412,7 @@ export const companionSystem = {
             const pullForce = 400;
             const pullDmg = 800; // Increased damage for singularities
             
-            const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter(Boolean);
+            const targets = [...enemySystem.enemies, bossSystem.currentBoss].filter(e => e && (e as any).isActive);
             targets.forEach(e => {
                 const dx = s.x - (e.x + e.width / 2);
                 const dy = s.y - (e.y + e.height / 2);

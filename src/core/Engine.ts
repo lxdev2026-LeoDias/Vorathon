@@ -22,7 +22,7 @@ import { gameOverSystem, GameOverStep } from '../systems/gameOverSystem';
 import { updatePlayerState, getPlayerState, triggerFeedback, evolvePowerUp, addScore, handlePlayerDeath, resetSession, addRune, addRelic, addLife, addRankingEntry, setPaused, updatePhaseTimeRemaining } from './Store';
 import { inputManager } from './InputManager';
 import { GameState } from './GameState';
-import { ScrollDirection, PowerUpClass } from './Types';
+import { ScrollDirection, PowerUpClass, EntityType } from './Types';
 import { BulletType } from './Bullet';
 import { DropType } from '../systems/dropSystem';
 
@@ -53,6 +53,7 @@ export class Engine {
     this.shotsCounter = 0;
     gameOverSystem.reset();
     eventSystem.reset();
+    bossSystem.reset();
     
     // Sync mode system with store
     const state = getPlayerState();
@@ -100,29 +101,35 @@ export class Engine {
     requestAnimationFrame(this.loop.bind(this));
   }
 
-  private spawnBullet = (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type: BulletType = BulletType.NORMAL, extraDmgMult: number = 1) => {
-    const pu = powerUpSystem.getEffect();
+  private spawnBullet = (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type: BulletType = BulletType.NORMAL, extraDmgMult: number = 1, isPrimary: boolean = true) => {
+    const isEnemy = ownerType === EntityType.ENEMY || ownerType === EntityType.BOSS;
+    const pu = powerUpSystem.getEffect(ownerType);
     const finalColor = color || (!isEnemy ? pu.bulletColor : undefined);
 
     if (!isEnemy) {
-        this.shotsCounter++;
-        const mods = effectSystem.getModifiers();
+        const mods = effectSystem.getModifiers(ownerType);
+        
+        // Count shots only if it's the player and primary shot
+        if (ownerType === EntityType.PLAYER && isPrimary) {
+            this.shotsCounter++;
+        }
+        
         const sizeMult = mods.weaponSizeMult || 1;
         
-        // Multi-shot logic
+        // Multi-shot logic - only for primary shots
         const spread = 0.1;
-        const count = pu.shotCount;
+        const count = isPrimary ? pu.shotCount : 1;
         for (let i = 0; i < count; i++) {
             const offset = (i - (count - 1) / 2) * spread;
-            const b = new Bullet(x, y, angle + offset, false, finalColor, type);
+            const b = new Bullet(x, y, angle + offset, ownerType, finalColor, type);
             b.width *= sizeMult;
             b.height *= sizeMult;
             b.damageMult = extraDmgMult;
             this.bullets.push(b);
         }
 
-        // Special Level 4 effect
-        if (this.shotsCounter >= 5) {
+        // Special Level 4 effect - only for Player and primary shot
+        if (ownerType === EntityType.PLAYER && isPrimary && this.shotsCounter >= 5) {
             this.shotsCounter = 0;
             if (pu.specialEffect) {
                 let sType = BulletType.NORMAL;
@@ -130,7 +137,7 @@ export class Engine {
                 if (pu.specialEffect === 'PLASMA') sType = BulletType.PLASMA;
                 if (pu.specialEffect === 'ARC') sType = BulletType.ARC;
 
-                const specialBullet = new Bullet(x, y, angle, false, finalColor, sType, 3);
+                const specialBullet = new Bullet(x, y, angle, EntityType.PLAYER, finalColor, sType, 3);
                 specialBullet.width *= sizeMult;
                 specialBullet.height *= sizeMult;
                 
@@ -145,12 +152,16 @@ export class Engine {
         }
 
         visualEffectSystem.emitShotParticles(x, y, finalColor || '#3b82f6');
-        runeSystem.onShoot((bx: number, by: number, ba: number) => {
-            this.bullets.push(new Bullet(bx, by, ba, false, finalColor));
-            visualEffectSystem.emitShotParticles(bx, by, finalColor || '#3b82f6');
-        }, { x, y });
+
+        // Rune system is definitely player-only
+        if (ownerType === EntityType.PLAYER && isPrimary) {
+            runeSystem.onShoot((bx: number, by: number, ba: number) => {
+                this.bullets.push(new Bullet(bx, by, ba, EntityType.PLAYER, finalColor));
+                visualEffectSystem.emitShotParticles(bx, by, finalColor || '#3b82f6');
+            }, { x, y });
+        }
     } else {
-        this.bullets.push(new Bullet(x, y, angle, isEnemy, color, type, extraDmgMult));
+        this.bullets.push(new Bullet(x, y, angle, ownerType, color, type, extraDmgMult));
     }
   };
 
@@ -257,7 +268,7 @@ export class Engine {
     statusSystem.update(delta, enemySystem.enemies, (id, dmg) => {
         const enemy = enemySystem.enemies.find(e => e.id === id);
         if (enemy) {
-            enemy.hp -= dmg;
+            enemy.takeDamage(dmg);
             if (Math.random() < 0.1) effectsSystem.addFloatingText(enemy.x, enemy.y, "🔥", '#f97316');
         }
     });
@@ -280,7 +291,7 @@ export class Engine {
         supporter: { x: this.player.x - 50, y: this.player.y + this.player.height + 30 }
     });
 
-    bossSystem.update(delta, { x: this.player.x, y: this.player.y }, this.spawnBullet);
+    bossSystem.update(delta, this.ctx!.canvas.width, this.ctx!.canvas.height, { x: this.player.x, y: this.player.y }, this.spawnBullet);
     eventSystem.update(delta);
     dropSystem.update(delta, { x: this.player.x, y: this.player.y });
     relicSystem.update(delta);
@@ -289,24 +300,29 @@ export class Engine {
 
     // --- COLLISION LOGIC ---
 
-    // 1. Player Bullets -> Enemies/Boss
-    const puEff = powerUpSystem.getEffect();
-    
+    // 1. Player/Bot Bullets -> Enemies/Boss
     this.bullets.filter(b => !b.isEnemyBullet).forEach(b => {
       // Check Enemies
       enemySystem.enemies.forEach(e => {
+        if (!e.isActive) return;
         if (combatSystem.checkCollision(b, e)) {
-          let damageMult = mods.damageMult * puEff.damageMult * b.damageMult;
+          const ownerType = (b as any).ownerType || EntityType.PLAYER;
+          const bMods = effectSystem.getModifiers(ownerType);
+          const bPuEff = powerUpSystem.getEffect(ownerType);
+
+          let damageMult = bMods.damageMult * bPuEff.damageMult * b.damageMult;
           
-          // Low HP Boost
-          const lowHpFX = mods.onInterval.find((f: any) => f.type === 'LOW_HP_BOOST');
-          if (lowHpFX) {
-              const missingHpPerc = 1 - (state.stats.hp / state.stats.maxHp);
-              damageMult *= (1 + missingHpPerc * lowHpFX.mult);
+          // Low HP Boost - PLAYER ONLY
+          if (ownerType === EntityType.PLAYER) {
+            const lowHpFX = bMods.onInterval.find((f: any) => f.type === 'LOW_HP_BOOST');
+            if (lowHpFX) {
+                const missingHpPerc = 1 - (state.stats.hp / state.stats.maxHp);
+                damageMult *= (1 + missingHpPerc * lowHpFX.mult);
+            }
           }
 
-          const baseDmg = (state.stats.damage + mods.bonusDamage) * damageMult;
-          const critChance = state.stats.critChance + mods.critChanceAdd;
+          const baseDmg = (state.stats.damage + bMods.bonusDamage) * damageMult;
+          const critChance = state.stats.critChance + bMods.critChanceAdd;
           const dmg = combatSystem.calculateDamage(baseDmg, critChance, state.stats.critDamage);
           
           e.takeDamage(dmg.amount);
@@ -314,12 +330,12 @@ export class Engine {
           visualEffectSystem.emitShotParticles(e.x + e.width/2, e.y + e.height/2, '#ffffff'); // Impact sparks
           
           // Execution check
-          if (e.hp / e.maxHp < mods.executionThreshold) {
+          if (e.hp / e.maxHp < bMods.executionThreshold) {
               e.hp = 0;
               effectsSystem.addFloatingText(e.x, e.y, "EXECUTED", '#ef4444', true);
           }
 
-          if (!mods.piercing) b.active = false;
+          if (!bMods.piercing) b.active = false;
           effectsSystem.addFloatingText(e.x, e.y, dmg.amount.toString(), dmg.isCrit ? '#fbbf24' : '#ffffff', dmg.isCrit);
           
           // PowerUp visual hit feedback
@@ -327,15 +343,17 @@ export class Engine {
           if (state.activePowerUp.class === PowerUpClass.ICE) visualEffectSystem.emitHitEffect(e.x, e.y, '#38bdf8');
           if (state.activePowerUp.class === PowerUpClass.ELECTRIC) visualEffectSystem.emitHitEffect(e.x, e.y, '#eab308');
 
-          // Rune hit effect
-          runeSystem.onHit(e, dmg.amount);
+          // Rune hit effect - PLAYER ONLY
+          if (ownerType === EntityType.PLAYER) {
+            runeSystem.onHit(e, dmg.amount);
+          }
 
           // Additional systems based on mods
-          mods.onHit.forEach((fx: any) => {
-              if (fx.type === 'HEAL' && Math.random() < fx.chance) {
+          bMods.onHit.forEach((fx: any) => {
+              if (fx.type === 'HEAL' && Math.random() < fx.chance && ownerType === EntityType.PLAYER) {
                   updatePlayerState(prev => ({
                       ...prev,
-                      stats: { ...prev.stats, hp: Math.min(prev.stats.maxHp, prev.stats.hp + fx.amount * mods.healingMult) }
+                      stats: { ...prev.stats, hp: Math.min(prev.stats.maxHp, prev.stats.hp + fx.amount * bMods.healingMult) }
                   }));
               }
               if (fx.type === 'SPLASH') {
@@ -357,19 +375,20 @@ export class Engine {
                 visualEffectSystem.emitExplosion(e.x + e.width/2, e.y + e.height/2, e.type === 'ELITE' ? '#f59e0b' : '#ef4444', 30);
             }
 
-            // Rune death effect
-            runeSystem.onDeath(e, (x: number, y: number, mult: number) => {
-                effectsSystem.addExplosion(x, y, '#ef4444', 30);
-                // Area damage logic could go here
-            });
-            relicSystem.onKill(e);
+            // Rune death effect - PLAYER ONLY
+            if (ownerType === EntityType.PLAYER) {
+                runeSystem.onDeath(e, (x: number, y: number, mult: number) => {
+                    effectsSystem.addExplosion(x, y, '#ef4444', 30);
+                });
+                relicSystem.onKill(e);
+            }
 
             // Relic/Rune onKill specifics
-            mods.onInterval.forEach((fx: any) => {
+            bMods.onInterval.forEach((fx: any) => {
                 // If we had onKill in onInterval, we'd process it here
             });
-            if (mods.onKillEnergy) {
-                updatePlayerState(prev => ({ ...prev, stats: { ...prev.stats, energy: Math.min(prev.stats.maxEnergy, prev.stats.energy + mods.onKillEnergy) } }));
+            if (ownerType === EntityType.PLAYER && bMods.onKillEnergy) {
+                updatePlayerState(prev => ({ ...prev, stats: { ...prev.stats, energy: Math.min(prev.stats.maxEnergy, prev.stats.energy + bMods.onKillEnergy) } }));
             }
 
             // PowerUp Evolution Drop Logic
@@ -424,13 +443,39 @@ export class Engine {
       });
 
       // Check Boss
-      if (bossSystem.currentBoss && combatSystem.checkCollision(b, bossSystem.currentBoss)) {
-          const dmg = combatSystem.calculateDamage(state.stats.damage * puEff.damageMult * b.damageMult, state.stats.critChance, state.stats.critDamage);
-          bossSystem.currentBoss.takeDamage(dmg.amount);
+      const bBoss = bossSystem.currentBoss;
+      if (bBoss && bBoss.isActive && combatSystem.checkCollision(b, bBoss)) {
+          const bOwnerType = (b as any).ownerType || EntityType.PLAYER;
+          const bBMods = effectSystem.getModifiers(bOwnerType);
+          const bBPuEff = powerUpSystem.getEffect(bOwnerType);
+          
+          let bDamageMult = bBMods.damageMult * bBPuEff.damageMult * b.damageMult;
+          
+          // Low HP Boost - PLAYER ONLY
+          if (bOwnerType === EntityType.PLAYER) {
+            const bLowHpFX = bBMods.onInterval.find((f: any) => f.type === 'LOW_HP_BOOST');
+            if (bLowHpFX) {
+                const bMissingHpPerc = 1 - (state.stats.hp / state.stats.maxHp);
+                bDamageMult *= (1 + bMissingHpPerc * bLowHpFX.mult);
+            }
+          }
+
+          const bBaseDmg = (state.stats.damage + bBMods.bonusDamage) * bDamageMult;
+          const bCritChance = state.stats.critChance + bBMods.critChanceAdd;
+          const bDmg = combatSystem.calculateDamage(bBaseDmg, bCritChance, state.stats.critDamage);
+          
+          bBoss.takeDamage(bDmg.amount);
           visualEffectSystem.emitHitEffect(b.x, b.y, '#f59e0b');
-          b.active = false;
-          effectsSystem.addFloatingText(bossSystem.currentBoss.x, bossSystem.currentBoss.y, dmg.amount.toString(), dmg.isCrit ? '#fbbf24' : '#ffffff', dmg.isCrit);
-          if (bossSystem.currentBoss.hp <= 0) {
+          if (!bBMods.piercing) b.active = false;
+          
+          effectsSystem.addFloatingText(bBoss.x, bBoss.y, bDmg.amount.toString(), bDmg.isCrit ? '#fbbf24' : '#ffffff', bDmg.isCrit);
+          
+          // Rune hit effect - PLAYER ONLY
+          if (bOwnerType === EntityType.PLAYER) {
+            runeSystem.onHit(bBoss, bDmg.amount);
+          }
+
+          if (bBoss.hp <= 0) {
               updatePlayerState(prev => ({
                   ...prev,
                   session: {
@@ -562,7 +607,13 @@ export class Engine {
           handlePlayerDeath();
           const newState = getPlayerState();
           if (newState.session.lives <= 0) {
-              addRankingEntry(newState.session.playerName, newState.session.score, newState.currentGameMode);
+              addRankingEntry(
+                  newState.session.playerName, 
+                  newState.session.score, 
+                  newState.currentGameMode,
+                  newState.session.selectedArea,
+                  newState.session.selectedDifficulty
+              );
               gameOverSystem.start(this.player!.x, this.player!.y);
               return;
           } else {

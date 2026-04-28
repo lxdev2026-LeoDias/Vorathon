@@ -2,6 +2,7 @@ import { getPlayerState } from '../core/Store';
 import runesData from '../data/runes.json';
 import relicsData from '../data/relics.json';
 import { skillTreeSystem } from './skillTreeSystem';
+import { EntityType } from '../core/Types';
 
 export class EffectSystem {
     private runes = (runesData as any).runes;
@@ -11,7 +12,37 @@ export class EffectSystem {
     private activeModifiers: any = {};
     private lastEquippedHash: string = '';
 
-    getModifiers() {
+    getEmptyModifiers() {
+        return {
+            damageMult: 1,
+            speedMult: 1,
+            fireRateMult: 1,
+            critChanceAdd: 0,
+            critDamageMult: 1,
+            maxHpAdd: 0,
+            maxHpMult: 1,
+            energyRecMult: 1,
+            goldMult: 1,
+            scoreMult: 1,
+            dodgeChance: 0,
+            piercing: false,
+            executionThreshold: 0,
+            healingMult: 1,
+            cooldownReduction: 1,
+            extraProjectiles: 0,
+            bonusDamage: 0,
+            maxEnergyAdd: 0,
+            onHit: [],
+            onDeath: [],
+            onShoot: [],
+            onInterval: [],
+            globalDebuff: null
+        };
+    }
+
+    getModifiers(type: EntityType = EntityType.PLAYER) {
+        if (type !== EntityType.PLAYER) return this.getEmptyModifiers();
+        
         const state = getPlayerState();
         const tree = state.skillTree || {};
         

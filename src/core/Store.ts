@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import playerInitialData from '../data/player.json';
 
-import { ChaosOrb, Difficulty } from './Types';
+import { ChaosOrb, Difficulty, RankingEntry } from './Types';
 import { checkChaosOrbConflict } from '../systems/forgeSystem';
 import { INITIAL_SKILL_TREE } from '../systems/skillTreeSystem';
 import { saveSystem, SaveData } from '../systems/saveSystem';
@@ -83,15 +83,32 @@ let globalPlayerState = {
   rankings: loadedSave ? loadedSave.rankings : (() => {
     try {
       const saved = localStorage.getItem('nebula_forge_rankings');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) return JSON.parse(saved);
+      
+      // Default mock rankings for empty state
+      return [
+        { name: 'ARES-X', score: 156400, mode: 'COSMIC_ASCENSION', date: '20-04-2026', areaId: 'area_1', difficulty: Difficulty.NIGHTMARE },
+        { name: 'NEBULA-Z', score: 142100, mode: 'COSMIC_ASCENSION', date: '21-04-2026', areaId: 'area_1', difficulty: Difficulty.HARD },
+        { name: 'CYBER-V', score: 98500, mode: 'STEEL_DOMINION', date: '22-04-2026', areaId: 'area_1', difficulty: Difficulty.NORMAL },
+        { name: 'POSEIDON-7', score: 210500, mode: 'COSMIC_ASCENSION', date: '23-04-2026', areaId: 'area_2', difficulty: Difficulty.APOCALYPSE },
+        { name: 'TRITON-X', score: 185000, mode: 'CELESTIAL_COLLAPSE', date: '24-04-2026', areaId: 'area_2', difficulty: Difficulty.NIGHTMARE }
+      ];
     } catch (e) {
       return [];
     }
-  })() as { name: string, score: number, mode: string, date: string }[],
+  })() as RankingEntry[],
   feedback: {
     shake: 0,
     flash: 0,
     hpChanged: false
+  },
+  jukebox: {
+    unlockedMusic: (loadedSave as any)?.jukebox?.unlockedMusic || ['nebula_menu'],
+    activeMusicId: 'nebula_menu',
+    volume: (loadedSave as any)?.jukebox?.volume ?? 0.6,
+    isPlaying: false,
+    shuffle: false,
+    loop: true
   },
   isPaused: false
 };
@@ -152,19 +169,23 @@ export const updatePlayerName = (name: string) => {
     }));
 };
 
-export const addRankingEntry = (name: string, score: number, mode: string) => {
+export const addRankingEntry = (name: string, score: number, mode: string, areaId: string, difficulty: string) => {
     updatePlayerState(prev => {
-        const newRanking = [...(prev.rankings || []), { 
+        const newEntry: RankingEntry = { 
             name: name || 'PILOTO', 
             score, 
             mode, 
-            date: new Date().toLocaleDateString() 
-        }];
+            date: new Date().toLocaleDateString(),
+            areaId: areaId || 'area_1',
+            difficulty: (difficulty || Difficulty.NORMAL) as Difficulty
+        };
         
-        // Sort by score descending and keep top 10
+        const newRanking = [...(prev.rankings || []), newEntry];
+        
+        // Sort by score descending and keep top 100
         const sortedRanking = newRanking
             .sort((a, b) => b.score - a.score)
-            .slice(0, 10);
+            .slice(0, 100);
         
         localStorage.setItem('nebula_forge_rankings', JSON.stringify(sortedRanking));
         

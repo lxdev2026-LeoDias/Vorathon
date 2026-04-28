@@ -11,6 +11,7 @@ import { GameModeType } from '../core/Types';
 import runesData from '../data/runes.json';
 import relicsData from '../data/relics.json';
 import { SkillTree } from './SkillTree';
+import { RankingsView } from './RankingsView';
 
 type MenuTheme = 'DEFAULT' | 'FIRE' | 'ICE' | 'LIGHTNING';
 
@@ -19,7 +20,6 @@ interface MainMenuProps {
 }
 
 export const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
-  const [showModes, setShowModes] = useState(false);
   const [showRanking, setShowRanking] = useState(false);
   const [showSkillTree, setShowSkillTree] = useState(false);
   const [showNameInput, setShowNameInput] = useState(false);
@@ -219,125 +219,73 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
         <div className={`absolute bottom-10 right-10 w-20 h-20 border-b-2 border-r-2 border-${themeConfig.accent}/40 rounded-br-3xl opacity-60`} />
 
         <AnimatePresence mode="wait">
-          {!showModes ? (
-            <motion.div 
-              key="main"
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ duration: 0.6, ease: "easeOut" }}
-              className="flex flex-col items-center"
+          <motion.div 
+            key="main"
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="flex flex-col items-center"
+          >
+            {/* Central Ship Decoration (Ambient) */}
+            <motion.div
+              animate={{ y: [0, -10, 0], rotate: [0, 1, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+              className={`mb-8 p-6 bg-${themeConfig.accent}/5 rounded-full border border-${themeConfig.accent}/10 backdrop-blur-md shadow-[0_0_50px_rgba(0,0,0,0.2)] group`}
             >
-              {/* Central Ship Decoration (Ambient) */}
-              <motion.div
-                animate={{ y: [0, -10, 0], rotate: [0, 1, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                className={`mb-8 p-6 bg-${themeConfig.accent}/5 rounded-full border border-${themeConfig.accent}/10 backdrop-blur-md shadow-[0_0_50px_rgba(0,0,0,0.2)] group`}
-              >
-                {theme === 'FIRE' ? (
-                  <Flame size={48} className="text-orange-500/60 group-hover:text-orange-400 Transition-colors drop-shadow-[0_0_20px_rgba(249,115,22,0.5)]" />
-                ) : theme === 'ICE' ? (
-                  <Snowflake size={48} className="text-cyan-300/60 group-hover:text-cyan-200 transition-colors drop-shadow-[0_0_20px_rgba(103,232,249,0.5)]" />
-                ) : theme === 'LIGHTNING' ? (
-                  <CloudLightning size={48} className="text-indigo-400/60 group-hover:text-indigo-300 transition-colors drop-shadow-[0_0_20px_rgba(129,140,248,0.5)]" />
-                ) : (
-                  <Rocket size={48} className="text-blue-500/30 group-hover:text-blue-400/60 transition-colors drop-shadow-[0_0_20px_rgba(59,130,246,0.5)]" />
-                )}
-              </motion.div>
-
-              <div className="relative">
-                <h1 className={`text-8xl md:text-9xl font-black mb-16 tracking-tighter text-transparent bg-clip-text bg-gradient-to-b ${themeConfig.title} italic animate-[logo-glow_4s_easeInOut_infinite] pr-4`}>
-                  VORATHON
-                </h1>
-                {/* Horizontal Light Bar behind logo */}
-                <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-1 ${theme === 'FIRE' ? 'bg-orange-500' : theme === 'ICE' ? 'bg-cyan-300' : theme === 'LIGHTNING' ? 'bg-indigo-400' : 'bg-blue-400'} blur-sm opacity-60 shadow-[0_0_30px_rgba(0,0,0,0.5)]`} />
-              </div>
-
-              <div className="flex flex-col gap-6 w-80 z-20">
-                <MenuButton 
-                  label="JOGAR" 
-                  icon={<Play size={22} className="fill-current" />} 
-                  onClick={() => setShowModes(true)} 
-                  primary 
-                  theme={theme}
-                />
-                <MenuButton 
-                  label="RANKING" 
-                  icon={<Trophy size={20} />} 
-                  onClick={() => setShowRanking(true)} 
-                  theme={theme}
-                />
-                <MenuButton 
-                  label="HABILIDADES" 
-                  icon={<BrainCircuit size={20} />} 
-                  onClick={() => setShowSkillTree(true)} 
-                  theme={theme}
-                />
-                <MenuButton 
-                  label="FORJA CELESTIAL" 
-                  icon={<Sword size={20} />} 
-                  onClick={() => onNavigate(GameState.FORGE)} 
-                  theme={theme}
-                />
-                <MenuButton 
-                  label="OPÇÕES" 
-                  icon={<ChevronRight size={20} />} 
-                  onClick={() => onNavigate(GameState.OPTIONS)} 
-                  theme={theme}
-                />
-              </div>
+              {theme === 'FIRE' ? (
+                <Flame size={48} className="text-orange-500/60 group-hover:text-orange-400 Transition-colors drop-shadow-[0_0_20px_rgba(249,115,22,0.5)]" />
+              ) : theme === 'ICE' ? (
+                <Snowflake size={48} className="text-cyan-300/60 group-hover:text-cyan-200 transition-colors drop-shadow-[0_0_20px_rgba(103,232,249,0.5)]" />
+              ) : theme === 'LIGHTNING' ? (
+                <CloudLightning size={48} className="text-indigo-400/60 group-hover:text-indigo-300 transition-colors drop-shadow-[0_0_20px_rgba(129,140,248,0.5)]" />
+              ) : (
+                <Rocket size={48} className="text-blue-500/30 group-hover:text-blue-400/60 transition-colors drop-shadow-[0_0_20px_rgba(59,130,246,0.5)]" />
+              )}
             </motion.div>
-          ) : (
-            <motion.div 
-              key="modes"
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="flex flex-col items-center w-full max-w-2xl px-4"
-            >
-              <h2 className={`text-4xl font-black italic mb-12 tracking-tighter uppercase text-transparent bg-clip-text bg-gradient-to-r ${themeConfig.title}`}>SELECIONE A OPERAÇÃO</h2>
-              
-              <div className="grid grid-cols-2 gap-6 w-full">
-                {modes.map((mode) => (
-                  <button
-                    key={mode.id}
-                    onClick={() => handleStartMode(mode.id)}
-                    className="relative p-8 bg-slate-900/60 backdrop-blur-md border border-white/5 rounded-2xl hover:border-blue-500/50 hover:bg-slate-800 transition-all text-left flex flex-col gap-4 group overflow-hidden"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent skew-x-12 -translate-x-full group-hover:translate-x-0 transition-transform duration-500" />
-                    
-                    <div className="flex justify-between items-start relative z-10">
-                      <div className="p-4 bg-slate-950 rounded-xl text-blue-500 border border-white/5 group-hover:text-blue-400 group-hover:border-blue-500/30 transition-all shadow-inner">
-                        {mode.playerType === 'SHIP' ? <Rocket size={24} /> : <Truck size={24} />}
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <span className="text-[10px] font-black text-blue-500/60 uppercase tracking-widest mb-1">
-                          Type // 0{mode.id === GameModeType.COSMIC_ASCENSION ? 1 : mode.id === GameModeType.CELESTIAL_COLLAPSE ? 2 : 3}
-                        </span>
-                        <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest px-2 py-0.5 bg-black/40 rounded border border-white/5">
-                            {mode.direction}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <div className="relative z-10">
-                      <h4 className="font-black text-xl mb-2 tracking-tight group-hover:text-blue-200 transition-colors">{mode.name}</h4>
-                      <p className="text-xs text-slate-400 leading-relaxed h-12 overflow-hidden opacity-80">{mode.description}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
 
-              <motion.button 
-                whileHover={{ x: -10 }}
-                onClick={() => setShowModes(false)}
-                className="mt-12 text-blue-400/60 hover:text-white font-black text-[10px] uppercase tracking-[0.4em] transition-all flex items-center gap-4 bg-black/40 px-8 py-3 rounded-full border border-white/5 hover:border-blue-500/30"
-              >
-                <div className="w-8 h-[1px] bg-blue-500/40" />
-                CANCELAR CONEXÃO
-              </motion.button>
-            </motion.div>
-          )}
+            <div className="relative">
+              <h1 className={`text-8xl md:text-9xl font-black mb-16 tracking-tighter text-transparent bg-clip-text bg-gradient-to-b ${themeConfig.title} italic animate-[logo-glow_4s_easeInOut_infinite] pr-4`}>
+                VORATHON
+              </h1>
+              {/* Horizontal Light Bar behind logo */}
+              <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-1 ${theme === 'FIRE' ? 'bg-orange-500' : theme === 'ICE' ? 'bg-cyan-300' : theme === 'LIGHTNING' ? 'bg-indigo-400' : 'bg-blue-400'} blur-sm opacity-60 shadow-[0_0_30px_rgba(0,0,0,0.5)]`} />
+            </div>
+
+            <div className="flex flex-col gap-6 w-80 z-20">
+              <MenuButton 
+                label="JOGAR" 
+                icon={<Play size={22} className="fill-current" />} 
+                onClick={() => handleStartMode(GameModeType.COSMIC_ASCENSION)} 
+                primary 
+                theme={theme}
+              />
+              <MenuButton 
+                label="RANKING" 
+                icon={<Trophy size={20} />} 
+                onClick={() => setShowRanking(true)} 
+                theme={theme}
+              />
+              <MenuButton 
+                label="HABILIDADES" 
+                icon={<BrainCircuit size={20} />} 
+                onClick={() => setShowSkillTree(true)} 
+                theme={theme}
+              />
+              <MenuButton 
+                label="FORJA CELESTIAL" 
+                icon={<Sword size={20} />} 
+                onClick={() => onNavigate(GameState.FORGE)} 
+                theme={theme}
+              />
+              <MenuButton 
+                label="OPÇÕES" 
+                icon={<ChevronRight size={20} />} 
+                onClick={() => onNavigate(GameState.OPTIONS)} 
+                theme={theme}
+              />
+            </div>
+          </motion.div>
         </AnimatePresence>
 
         {/* --- NAME INPUT MODAL --- */}
@@ -397,93 +345,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ onNavigate }) => {
         {/* --- RANKING MODAL --- */}
         <AnimatePresence>
           {showRanking && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setShowRanking(false)}
-                className="absolute inset-0 bg-black/90 backdrop-blur-xl"
-              />
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0, y: 50 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.9, opacity: 0, y: 50 }}
-                className="relative bg-slate-900/80 border border-yellow-500/30 rounded-[40px] p-12 w-full max-w-2xl shadow-[0_0_100px_rgba(234,179,8,0.1)] overflow-hidden"
-              >
-                {/* Decorative Elements */}
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-yellow-500/50 to-transparent" />
-                <div className="absolute -top-24 -right-24 w-64 h-64 bg-yellow-500/5 blur-[100px] rounded-full" />
-                
-                <div className="flex justify-between items-center mb-12">
-                  <div className="flex items-center gap-4">
-                    <div className="p-3 bg-yellow-500/20 rounded-xl border border-yellow-500/30 shadow-[0_0_15px_rgba(234,179,8,0.2)]">
-                      <Trophy size={32} className="text-yellow-500" />
-                    </div>
-                    <div className="flex flex-col">
-                      <h3 className="text-4xl font-black italic tracking-tighter text-white">RANKING GLOBAL</h3>
-                      <span className="text-[10px] text-yellow-500 font-mono tracking-[0.4em] uppercase">Top 10 Melhores Pilotos</span>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowRanking(false);
-                    }}
-                    className="p-3 bg-white/5 hover:bg-white/10 rounded-full transition-all text-slate-400 hover:text-white relative z-50 cursor-pointer"
-                  >
-                    <X size={24} />
-                  </button>
-                </div>
-
-                <div className="space-y-2 max-h-[500px] overflow-y-auto pr-4 custom-scrollbar">
-                  {rankings && rankings.length > 0 ? (
-                    rankings.map((entry: any, i: number) => (
-                      <div 
-                        key={i} 
-                        className={`group flex items-center justify-between p-5 rounded-2xl border transition-all ${
-                          i === 0 ? 'bg-yellow-500/10 border-yellow-500/30' : 
-                          i === 1 ? 'bg-slate-400/10 border-slate-400/30' :
-                          i === 2 ? 'bg-orange-600/10 border-orange-600/30' :
-                          'bg-black/20 border-white/5 hover:border-white/20'
-                        }`}
-                      >
-                        <div className="flex items-center gap-6">
-                          <span className={`w-8 text-2xl font-black italic italic ${
-                            i === 0 ? 'text-yellow-500' : 
-                            i === 1 ? 'text-slate-400' :
-                            i === 2 ? 'text-orange-600' :
-                            'text-slate-600'
-                          }`}>
-                            {i + 1}
-                          </span>
-                          <div className="flex flex-col">
-                            <span className="text-lg font-black tracking-widest text-white group-hover:text-blue-300 transition-colors">{entry.name}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="text-[9px] font-mono text-slate-500 tracking-wider bg-black/40 px-2 py-0.5 rounded border border-white/5">{entry.mode}</span>
-                              <span className="text-[9px] font-mono text-slate-600">{entry.date}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <span className={`text-2xl font-black italic tracking-tighter ${
-                            i === 0 ? 'text-yellow-500' : 'text-blue-400'
-                          }`}>
-                            {entry.score?.toLocaleString() || 0}
-                          </span>
-                          <span className="text-[8px] text-slate-500 font-black uppercase tracking-widest">PONTOS</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-20 text-slate-600 gap-4">
-                      <Sparkles size={48} className="opacity-20" />
-                      <p className="font-mono text-xs uppercase tracking-[0.3em]">Nenhum registro encontrado</p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            </div>
+            <RankingsView onClose={() => setShowRanking(false)} />
           )}
 
           {showSkillTree && (

@@ -1,4 +1,4 @@
-import { Entity } from '../core/Types';
+import { Entity, Difficulty, EntityType } from '../core/Types';
 import { effectsSystem } from './effectsSystem';
 import { visualEffectSystem } from './visualEffectSystem';
 import { modeSystem } from './modeSystem';
@@ -13,6 +13,7 @@ export enum EnemyType {
 }
 
 export class Enemy implements Entity {
+  entityType: EntityType = EntityType.ENEMY;
   id: string;
   x: number;
   y: number;
@@ -28,8 +29,16 @@ export class Enemy implements Entity {
   blinkTimer: number = 0;
   knockbackX: number = 0;
   frozenTimer: number = 0;
+  isActive: boolean = false;
   private organicTimer: number = Math.random() * 10;
   private trailTimer: number = 0;
+  
+  // New reactive/resistance mechanics
+  private lastHitTime: number = 0;
+  private recentHits: number = 0;
+  private reactiveActionTimer: number = 0;
+  private reactiveX: number = 0;
+  private reactiveY: number = 0;
   
   get isFrozen() { return this.frozenTimer > 0; }
 
@@ -45,11 +54,11 @@ export class Enemy implements Entity {
     switch(type) {
       case EnemyType.ELITE:
         this.speed = 60 * diff.enemySpeedMultiplier * eventAggro;
-        this.maxHp = 90 * diff.enemyHealthMultiplier * diff.eliteHealthMultiplier;
+        this.maxHp = 270 * diff.enemyHealthMultiplier * diff.eliteHealthMultiplier; // 3x Increase (was 90)
         this.damage = 25 * diff.enemyDamageMultiplier;
         this.width = 75;
         this.height = 75;
-        this.shootInterval = 1.5 / (diff.enemySpeedMultiplier * eventAggro); // Faster attack frequency
+        this.shootInterval = 1.5 / (diff.enemySpeedMultiplier * eventAggro);
         break;
       case EnemyType.FAST:
         this.speed = 250 * diff.enemySpeedMultiplier * eventAggro;
@@ -61,7 +70,7 @@ export class Enemy implements Entity {
         break;
       default:
         this.speed = 100 * diff.enemySpeedMultiplier * eventAggro;
-        this.maxHp = 30 * diff.enemyHealthMultiplier;
+        this.maxHp = 45 * diff.enemyHealthMultiplier; // 1.5x Increase (was 30)
         this.damage = 10 * diff.enemyDamageMultiplier;
         this.width = 50;
         this.height = 50;
@@ -75,17 +84,56 @@ export class Enemy implements Entity {
   }
 
   takeDamage(amount: number) {
+    if (!this.isActive) return;
+
     if (this.isFrozen && amount > 0) {
-      this.hp -= amount * 100; // Force immediate death while maintaining damage flow
+      this.hp -= amount * 2;
       if (this.hp < 0) this.hp = 0;
       return;
     }
-    this.hp -= amount;
+
+    let finalAmount = amount;
+    const now = performance.now();
+
+    // Elite Resistance: -20% damage if hit rapidly
+    if (this.type === EnemyType.ELITE) {
+        if (now - this.lastHitTime < 150) {
+            this.recentHits++;
+            if (this.recentHits > 2) {
+                finalAmount *= 0.8;
+            }
+        } else {
+            this.recentHits = Math.max(0, this.recentHits - 1); 
+        }
+
+        // Trigger Reactive behavior on high recent hits
+        if (this.recentHits > 6 && this.reactiveActionTimer <= 0) {
+            this.triggerReactiveBehavior();
+        }
+    }
+
+    this.lastHitTime = now;
+    this.hp -= finalAmount;
     this.blinkTimer = 0.1;
-    this.knockbackX = 10; // Simple visual pop back
+    this.knockbackX = 10;
   }
 
-  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
+  private triggerReactiveBehavior() {
+      this.reactiveActionTimer = 0.8;
+      // Random evasion direction
+      const angle = Math.random() * Math.PI * 2;
+      this.reactiveX = Math.cos(angle) * 150;
+      this.reactiveY = Math.sin(angle) * 150;
+  }
+
+  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type?: BulletType, dmgMult?: number, isPrimary?: boolean) => void) {
+    if (!this.isActive) {
+        const margin = 50; 
+        if (this.x > -margin && this.x < canvasWidth + margin && this.y > -margin && this.y < canvasHeight + margin) {
+            this.isActive = true;
+        }
+    }
+
     if (this.blinkTimer > 0) this.blinkTimer -= delta;
     if (this.frozenTimer > 0) this.frozenTimer -= delta;
     if (this.knockbackX > 0) this.knockbackX *= 0.8;
@@ -96,11 +144,21 @@ export class Enemy implements Entity {
     const currentSpeed = this.isFrozen ? 0 : this.speed;
 
     if (this.type === EnemyType.ELITE) {
-      const dx = playerPos.x - (this.x - this.knockbackX);
-      const dy = playerPos.y - this.y;
-      const angle = Math.atan2(dy, dx);
-      this.x += Math.cos(angle) * currentSpeed * delta;
-      this.y += Math.sin(angle) * currentSpeed * delta;
+      // Reactive movement has priority
+      if (this.reactiveActionTimer > 0) {
+          this.reactiveActionTimer -= delta;
+          this.x += this.reactiveX * delta;
+          this.y += this.reactiveY * delta;
+          // Friction
+          this.reactiveX *= 0.95;
+          this.reactiveY *= 0.95;
+      } else {
+          const dx = playerPos.x - (this.x - this.knockbackX);
+          const dy = playerPos.y - this.y;
+          const angle = Math.atan2(dy, dx);
+          this.x += Math.cos(angle) * currentSpeed * delta;
+          this.y += Math.sin(angle) * currentSpeed * delta;
+      }
     } else {
       switch(mode.spawnSide) {
         case 'RIGHT': this.x -= currentSpeed * delta; break;
@@ -130,7 +188,7 @@ export class Enemy implements Entity {
                 const dx = playerPos.x - this.x;
                 const dy = playerPos.y - this.y;
                 const angle = Math.atan2(dy, dx);
-                spawnBullet(this.x, this.y + this.height/2, angle, true);
+                spawnBullet(this.x, this.y + this.height/2, angle, EntityType.ENEMY);
             }
         }
     }
@@ -236,50 +294,34 @@ export class EnemySystem {
     this.spawnTimer = 0;
   }
 
-  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, dmgMult?: number) => void) {
+  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type?: BulletType, dmgMult?: number, isPrimary?: boolean) => void) {
     const mode = modeSystem.getCurrentMode();
     const diff = difficultySystem.getModifiers();
     const eventSpawnMult = eventSystem.getSpawnMultiplier();
     
     // Intensity and Difficulty scale the timer
-    this.spawnTimer += delta * mode.intensity * diff.spawnRateMultiplier * eventSpawnMult;
+    // Increase spawn base by +20% (1.2 multiplier)
+    this.spawnTimer += delta * mode.intensity * diff.spawnRateMultiplier * eventSpawnMult * 1.2;
     
     if (this.spawnTimer > 1.2) {
       this.spawnTimer = 0;
-      const roll = Math.random();
-      let type = EnemyType.COMMON;
       
-      // Elite chance increases with phase
-      const eliteChance = 0.15 + diff.eliteChanceAdd;
-      const fastChance = 0.25;
+      // High difficulty tactical formations (NIGHTMARE and above)
+      const currentDiff = difficultySystem.getCurrentDifficulty();
+      const isHighDiff = currentDiff === Difficulty.NIGHTMARE || 
+                         currentDiff === Difficulty.APOCALYPSE || 
+                         currentDiff === Difficulty.INFERNO || 
+                         currentDiff === Difficulty.CHAOS;
 
-      if (roll < eliteChance) type = EnemyType.ELITE;
-      else if (roll < eliteChance + fastChance) type = EnemyType.FAST;
-      
-      let x = 0, y = 0;
-      switch(mode.spawnSide) {
-        case 'RIGHT':
-            x = canvasWidth + 50;
-            y = Math.random() * (canvasHeight - 50);
-            break;
-        case 'TOP':
-            x = Math.random() * (canvasWidth - 50);
-            y = -50;
-            break;
-        case 'LEFT':
-            x = -50;
-            y = Math.random() * (canvasHeight - 50);
-            break;
-        case 'BOTTOM':
-            x = Math.random() * (canvasWidth - 50);
-            y = canvasHeight + 50;
-            break;
+      if (isHighDiff && Math.random() < 0.25) {
+          this.spawnFormation(canvasWidth, canvasHeight, mode.spawnSide);
+      } else {
+          this.spawnSingleEnemy(canvasWidth, canvasHeight, mode.spawnSide, diff);
       }
-      this.enemies.push(new Enemy(x, y, type));
     }
 
     this.enemies.forEach(e => {
-      e.update(delta, playerPos, spawnBullet);
+      e.update(delta, canvasWidth, canvasHeight, playerPos, spawnBullet);
     });
     
     // Remove off-screen or dead
@@ -288,6 +330,73 @@ export class EnemySystem {
         const isOffscreen = e.x < -200 || e.x > canvasWidth + 200 || e.y < -200 || e.y > canvasHeight + 200;
         return !isDead && !isOffscreen;
     });
+  }
+
+  private spawnSingleEnemy(innerWidth: number, innerHeight: number, spawnSide: string, diff: any) {
+      const roll = Math.random();
+      let type = EnemyType.COMMON;
+      
+      const eliteChance = 0.15 + diff.eliteChanceAdd;
+      const fastChance = 0.25;
+
+      if (roll < eliteChance) type = EnemyType.ELITE;
+      else if (roll < eliteChance + fastChance) type = EnemyType.FAST;
+      
+      let x = 0, y = 0;
+      switch(spawnSide) {
+        case 'RIGHT': x = innerWidth + 50; y = Math.random() * (innerHeight - 50); break;
+        case 'TOP': x = Math.random() * (innerWidth - 50); y = -50; break;
+        case 'LEFT': x = -50; y = Math.random() * (innerHeight - 50); break;
+        case 'BOTTOM': x = Math.random() * (innerWidth - 50); y = innerHeight + 50; break;
+      }
+      this.enemies.push(new Enemy(x, y, type));
+  }
+
+  private spawnFormation(innerWidth: number, innerHeight: number, spawnSide: string) {
+      const formations = ['<', '>', 'V', 'O', '-'];
+      const chosen = formations[Math.floor(Math.random() * formations.length)];
+      
+      const xBase = spawnSide === 'RIGHT' ? innerWidth + 50 : spawnSide === 'LEFT' ? -50 : innerWidth / 2;
+      const yBase = spawnSide === 'TOP' ? -50 : spawnSide === 'BOTTOM' ? innerHeight + 50 : innerHeight / 2;
+
+      const spacing = 60;
+      
+      switch(chosen) {
+          case '<': // Left-pointing V (flank)
+              for(let i=0; i<5; i++) {
+                  const offset = i - 2;
+                  this.enemies.push(new Enemy(xBase + Math.abs(offset) * spacing, yBase + offset * spacing));
+              }
+              break;
+          case '>': // Right-pointing V (frontal pressure)
+              for(let i=0; i<5; i++) {
+                  const offset = i - 2;
+                  this.enemies.push(new Enemy(xBase - Math.abs(offset) * spacing, yBase + offset * spacing));
+              }
+              break;
+          case 'V': // Downward V (surrounding)
+              for(let i=0; i<5; i++) {
+                  const offset = i - 2;
+                  this.enemies.push(new Enemy(xBase + offset * spacing, yBase - Math.abs(offset) * spacing));
+              }
+              break;
+          case 'O': // Circle (imprisonment)
+              for(let i=0; i<8; i++) {
+                  const angle = (i / 8) * Math.PI * 2;
+                  this.enemies.push(new Enemy(xBase + Math.cos(angle) * spacing * 2, yBase + Math.sin(angle) * spacing * 2));
+              }
+              break;
+          case '-': // Line (blocking)
+              for(let i=0; i<5; i++) {
+                  const offset = i - 2;
+                  if (spawnSide === 'RIGHT' || spawnSide === 'LEFT') {
+                      this.enemies.push(new Enemy(xBase, yBase + offset * spacing));
+                  } else {
+                      this.enemies.push(new Enemy(xBase + offset * spacing, yBase));
+                  }
+              }
+              break;
+      }
   }
 
   draw(ctx: CanvasRenderingContext2D) {

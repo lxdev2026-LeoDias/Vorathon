@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Save, Download, Upload, CheckCircle2, AlertCircle, FileText, X } from 'lucide-react';
+import { ArrowLeft, Save, Download, Upload, CheckCircle2, AlertCircle, FileText, X, Music } from 'lucide-react';
 import { getPlayerState, updatePlayerState } from '../core/Store';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { ChaosArchive } from './ChaosArchive';
 
 // Encryption/Decryption helpers (Simple base64 + some XOR for "obfuscated" encryption as requested)
 const ENCRYPTION_KEY = 'NEBULA_FORGE_PROTECTION';
@@ -29,6 +30,7 @@ interface OptionsScreenProps {
 
 export const OptionsScreen: React.FC<OptionsScreenProps> = ({ onBack }) => {
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showJukebox, setShowJukebox] = useState(false);
   const [showImportStatus, setShowImportStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
   const [exportConfig, setExportConfig] = useState({
@@ -155,6 +157,7 @@ export const OptionsScreen: React.FC<OptionsScreenProps> = ({ onBack }) => {
 
         <div className="space-y-10">
           <OptionGroup label="DADOS & PROGRESSO">
+            {/* ... data buttons ... */}
             <div className="grid grid-cols-2 gap-4">
               <button 
                 onClick={() => setShowExportModal(true)}
@@ -178,6 +181,27 @@ export const OptionsScreen: React.FC<OptionsScreenProps> = ({ onBack }) => {
                 <span className="font-bold">{showImportStatus.message}</span>
               </div>
             )}
+          </OptionGroup>
+
+          <OptionGroup label="MULTIPLATAFORMA">
+            <button 
+              onClick={() => setShowJukebox(true)}
+              className="w-full flex items-center justify-between p-6 bg-indigo-600 hover:bg-indigo-500 rounded-2xl transition-all group relative overflow-hidden"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+              <div className="flex items-center gap-4 relative z-10">
+                <div className="p-3 bg-white/20 rounded-xl">
+                  <Music className="text-white" size={24} />
+                </div>
+                <div className="flex flex-col items-start">
+                  <span className="text-xl font-black italic text-white tracking-tight">ARQUIVO DO CAOS</span>
+                  <span className="text-[10px] font-mono text-indigo-200 uppercase tracking-widest">Acesse sua trilha sonora cósmica</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 px-4 py-2 bg-black/20 rounded-full text-[10px] font-black italic text-white/80 group-hover:bg-black/40 transition-colors relative z-10">
+                SINTONIZAR
+              </div>
+            </button>
           </OptionGroup>
 
           <OptionGroup label="ÁUDIO">
@@ -265,6 +289,12 @@ export const OptionsScreen: React.FC<OptionsScreenProps> = ({ onBack }) => {
           </motion.div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showJukebox && (
+          <ChaosArchive onClose={() => setShowJukebox(false)} />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

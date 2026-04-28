@@ -203,6 +203,10 @@ export class DifficultySystem {
   applyMultiplier(baseValue: number, multiplier: number): number {
     return baseValue * multiplier;
   }
+
+  getCurrentDifficulty(): Difficulty {
+    return getPlayerState().session.selectedDifficulty as Difficulty;
+  }
 }
 
 export const difficultySystem = new DifficultySystem();

@@ -1,6 +1,7 @@
 import { Boss, BossData } from '../core/Boss';
 import { difficultySystem } from './difficultySystem';
 import bossesData from '../data/bosses.json';
+import { EntityType } from '../core/Types';
 
 import { BulletType } from '../core/Bullet';
 
@@ -24,16 +25,16 @@ export class BossSystem {
     const diff = difficultySystem.getModifiers();
     const scaledData = {
         ...data,
-        vida: Math.floor(data.vida * diff.bossHealthMultiplier * (1 + (hpBonusPercent / 100)))
+        vida: Math.floor(data.vida * 3 * diff.bossHealthMultiplier * (1 + (hpBonusPercent / 100)))
     };
 
     this.currentBoss = new Boss(canvasWidth + 200, canvasHeight / 2 - 100, scaledData);
     this.bossDefeated = false;
   }
 
-  update(delta: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, isEnemy: boolean, color?: string, type?: BulletType, extraDmgMult?: number) => void) {
+  update(delta: number, canvasWidth: number, canvasHeight: number, playerPos: { x: number, y: number }, spawnBullet: (x: number, y: number, angle: number, ownerType: EntityType, color?: string, type?: BulletType, extraDmgMult?: number, isPrimary?: boolean) => void) {
     if (this.currentBoss) {
-      this.currentBoss.update(delta, playerPos, spawnBullet);
+      this.currentBoss.update(delta, canvasWidth, canvasHeight, playerPos, spawnBullet);
       if (this.currentBoss.hp <= 0) {
         this.currentBoss = null;
         this.bossDefeated = true;
