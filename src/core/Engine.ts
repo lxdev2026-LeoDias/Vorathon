@@ -524,6 +524,9 @@ export class Engine {
 
     // 3. Player -> Drops
     dropSystem.drops.forEach((d, idx) => {
+        // Gold is now handled automatically in DropSystem (puffs after 1s)
+        if (d.type === DropType.GOLD) return;
+
         if (combatSystem.checkCollision(d, playerBox)) {
             if (d.type === DropType.ELEMENTAL_EVOLUTION) {
                 evolvePowerUp();
@@ -541,18 +544,16 @@ export class Engine {
                 addLife(1);
                 effectsSystem.addFloatingText(this.player!.x, this.player!.y - 50, "+1 LIFE", '#ef4444', true);
                 visualEffectSystem.emitExplosion(this.player!.x, this.player!.y, '#ef4444', 40);
-            } else {
+            } else if (d.type === DropType.SHARD) {
                 updatePlayerState(prev => ({
                     ...prev,
                     currency: {
                         ...prev.currency,
-                        gold: d.type === 'GOLD' ? prev.currency.gold + Math.floor(50 * diffMods.goldMultiplier) : prev.currency.gold,
-                        primordialShards: d.type === DropType.SHARD ? prev.currency.primordialShards + Math.floor(1 * diffMods.shardsMultiplier) : prev.currency.primordialShards
+                        primordialShards: prev.currency.primordialShards + Math.floor(1 * diffMods.shardsMultiplier)
                     },
                     session: {
                         ...prev.session,
-                        goldGained: d.type === 'GOLD' ? prev.session.goldGained + Math.floor(50 * diffMods.goldMultiplier) : prev.session.goldGained,
-                        shardsGained: d.type === DropType.SHARD ? prev.session.shardsGained + Math.floor(1 * diffMods.shardsMultiplier) : prev.session.shardsGained
+                        shardsGained: prev.session.shardsGained + Math.floor(1 * diffMods.shardsMultiplier)
                     }
                 }));
             }
